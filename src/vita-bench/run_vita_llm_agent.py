@@ -161,6 +161,9 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
             agent_msg = None
             for attempt in range(3):
                 candidate, new_state = agent.generate_next_message(message, _clone(state))
+                if candidate is not None:
+                    # Count every completion, including retries rejected below.
+                    _accumulate_usage(summary, candidate)
                 if candidate is not None and (
                     candidate.has_text_content() or candidate.is_tool_call()
                 ):
@@ -171,7 +174,6 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
                 summary["termination_reason"] = "invalid_agent_message"
                 break
 
-            _accumulate_usage(summary, agent_msg)
             steps += 1
 
             if agent_msg.is_tool_call():
