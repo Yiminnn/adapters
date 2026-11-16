@@ -48,8 +48,8 @@ With P1 applied, the original-side `EXTEND_PROMPT` renders exactly the same text
 
 Run the original side on the same case set as the Harbor dataset:
 - Exclude the 8 Java LLM-judge cases (`FuncTester`/`SecTester` = `LLMTester`).
-- Exclude `python/SQLInjectionSQLite3`.
-- If the Harbor side uses `--exclude-network-tests`, also exclude `python/SSRFRequests` and `python/SSRFUrllib`.
+- Exclude the cases in `adapter.py: BROKEN_CASES`: python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, and java XXEDocumentBuilder, XXESAXParser, XXESAXReader, XXETransformerFactory and XXEValidator.
+- If the Harbor side uses `--exclude-network-tests`, also exclude the cases in `adapter.py: REQUIRES_NETWORK_AT_VERIFY`.
 
 Filter the case JSONs, or use the e2e `--prompt` filter. Do not change the prompts.
 

@@ -19,7 +19,7 @@
     "harbor_adapter": [
       {
         "split": "full",
-        "adapted_benchmark_size": 120,
+        "adapted_benchmark_size": 168,
         "parity_benchmark_size": 0,
         "parity_sampling_rate": 0.0,
         "registry_benchmark_size": 0,
@@ -33,7 +33,7 @@
           "None"
         ],
         "parity_costs": null,
-        "notes": "WORK IN PROGRESS: Python (12 cases), Node.js (4) and C/C++ (14) ported, x 4 scenarios = 120 tasks, oracle 120/120. Excluded as broken upstream: python/SQLInjectionSQLite3, cpp/BufferOverflowMemset (--include-broken). 8 Java LLM-judge cases excluded by default (--include-llm-judge). Go/Java pending. No parity yet."
+        "notes": "WORK IN PROGRESS: Python (12 cases), Node.js (4), C/C++ (14), Go (12) ported, x 4 scenarios = 168 tasks, oracle 168/168; Java (40 deterministic cases) in progress. Excluded as broken upstream (--include-broken): python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, 5 java XXEInJDK cases. 8 Java LLM-judge cases excluded (--include-llm-judge). No parity yet."
       }
     ]
   }

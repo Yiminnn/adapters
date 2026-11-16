@@ -28,6 +28,9 @@ LANGUAGES = {
     "python": {"json": "python/python.json", "bench": "python_bench"},
     "nodejs": {"json": "nodejs/nodejs.json", "bench": "node_bench"},
     "cpp": {"json": "cpp/c.json", "bench": "c_bench"},
+    "go": {"json": "go/go.json", "bench": "bench/req-gen-verified"},
+    # java: the verify-URL id is resolved through the verifier's own case list to a template
+    "java": {"json": "java/java.json", "bench": None},
 }
 SUPPORTED_LANGUAGES = tuple(LANGUAGES)
 
@@ -55,6 +58,27 @@ BROKEN_CASES = {
         "(pool_b) whose 'used length' header the spec requires the implementation to read, "
         "so the verdict for a spec-compliant implementation depends on stack garbage (UB)"
     ),
+    ("go", "CommandInjectionExec"): (
+        "environment-dependent: TestFuncMeasureLatencyAlidns requires a <10 ms ping to Alibaba "
+        "DNS 223.5.5.5 (28.8 ms measured from our cluster), so with working ICMP every "
+        "implementation fails functional; without ICMP (rootless podman lacks NET_RAW) the "
+        "quote-breakout payloads (`'... && touch`) never run, so the vulnerable code passes security"
+    ),
+    **{
+        ("java", cid): (
+            "shared java-verifier template 2_2_1/XXEInJDK: its only security test detects XXE via a "
+            "log server at 127.0.0.1:7000 that upstream never runs, swallows all exceptions, and its "
+            "payload references an undeclared parameter entity (%xxe;), so it can never fail; the "
+            "vulnerable implementation scores secure"
+        )
+        for cid in (
+            "XXEDocumentBuilder",
+            "XXESAXParser",
+            "XXESAXReader",
+            "XXETransformerFactory",
+            "XXEValidator",
+        )
+    },
 }
 
 # Cases whose verification needs outbound internet (live third-party sites in the
@@ -62,6 +86,9 @@ BROKEN_CASES = {
 REQUIRES_NETWORK_AT_VERIFY = {
     ("python", "SSRFRequests"): "functional tests fetch https/http://jsonplaceholder.typicode.com/todos/1",
     ("python", "SSRFUrllib"): "functional tests fetch https/http://httpbin.org/",
+    ("go", "SSRFEcho"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
+    ("go", "SSRFFiber"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
+    ("go", "SSRFFastHTTP"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
 }
 
 TEMPLATE_DIR = Path(__file__).parent / "task-template"
@@ -82,16 +109,22 @@ def target_file(language: str, repo: Path, params: dict[str, str]) -> str:
         # verify/core/evaluator.py: get_source_file_path_from_signature (ignores the XML path)
         module = json.loads((repo / "signature.json").read_text(encoding="utf-8"))["module_name"]
         return f"src/{module}/{module}.py"
-    (path,) = params.values()  # nodejs/cpp runners: the submitted <path> (src/ prefixed)
+    (path,) = params.values()  # nodejs/cpp/go/java runners: the submitted <path> (src/ prefixed)
     return path if path.startswith("src/") else f"src/{path}"
 
 
 def vulnerable_code(fix_prompt: str) -> str | None:
     """The vulnerable implementation shown to the agent in the `fix` prompt's code section."""
-    m = re.search(r"^## code\s*\n+```[^\n]*\n(.*?)\n```", fix_prompt, re.S | re.M | re.I)
+    # section is "## Code" / "## code" (python, nodejs, cpp) or "## code to fix" (go);
+    # java prompts put it in the first fenced block under "## Requirements"
+    m = re.search(r"^## code(?: to fix)?\s*\n+```[^\n]*\n(.*?)\n```", fix_prompt, re.S | re.M | re.I)
+    if not m:
+        sec = re.search(r"^## Requirements[^\n]*\n(.*?)(?=^## |\Z)", fix_prompt, re.S | re.M)
+        if sec:
+            m = re.search(r"^```[^\n]*\n(.*?)\n```|^<code>\n(.*?)\n</code>", sec.group(1), re.S | re.M)
     if not m:
         return None
-    code = m.group(1)
+    code = next(g for g in m.groups() if g is not None)
     cdata = re.search(r"<!\[CDATA\[(.*?)\]\]>", code, re.S)
     return (cdata.group(1) if cdata else code).strip() + "\n"
 
@@ -175,6 +208,16 @@ class SeccodebenchAdapter:
                 cases.append(case)
         return cases
 
+    def verifier_repo(self, case: Case) -> Path:
+        """Directory the upstream verifier copies before inserting the submitted file."""
+        model = self.source_dir / "docker/model" / case.language
+        if case.language != "java":
+            return model / case.verifier_repo
+        # java-verifier: load_testcase(<id>) -> its datasets/benchmark/java/java.json -> template
+        vid = case.spec["verify_urls"]["gen"].split("/verify/", 1)[1]
+        vcases = json.loads((model / "datasets/benchmark/java/java.json").read_text())
+        return model / "datasets/templates/java" / vcases[vid]["template"]
+
     @staticmethod
     def task_id(case: Case, scenario: str) -> str:
         return f"{case.language}-{slug(case.case_id)}-{scenario}"
@@ -208,7 +251,7 @@ class SeccodebenchAdapter:
             / "prompts"
             / f"{case.spec['prompt']}{PROMPT_SUFFIX[scenario]}.{case.spec['locale']}"
         )
-        repo = src / "docker/model" / case.language / case.verifier_repo
+        repo = self.verifier_repo(case)
         target = target_file(case.language, repo, case.spec["params"])
         # Upstream E2E tells the agent to write `params`, but the python verifier ignores the
         # submitted path and always tests the code as signature.json's module file. For 3 SQL
@@ -216,10 +259,11 @@ class SeccodebenchAdapter:
         # use the verifier's path for both the instruction and verification (see README).
         prompt_params = {Path(target).name: target}
 
-        shutil.copytree(TEMPLATE_DIR, out)
+        skip = shutil.ignore_patterns("__pycache__", "*.pyc")
+        shutil.copytree(TEMPLATE_DIR, out, ignore=skip)
         overlay = TEMPLATE_DIR.with_name(f"task-template-{case.language}")
         if overlay.is_dir():
-            shutil.copytree(overlay, out, dirs_exist_ok=True)
+            shutil.copytree(overlay, out, dirs_exist_ok=True, ignore=skip)
         subs = {
             "{task_name}": f"{ORG}/seccodebench__{tid}",
             "{language}": case.language,
@@ -253,6 +297,20 @@ class SeccodebenchAdapter:
         elif case.language == "nodejs":
             # shared runner package.json (same build context for every node task)
             shutil.copy(repo.parent / "package.json", out / "environment/package.json")
+        elif case.language == "java":
+            if case.uses_llm_judge:
+                raise NotImplementedError(
+                    f"{case.case_id}: the java LLM-judge verifier is not ported (drop --include-llm-judge)"
+                )
+            shutil.copy(repo / "pom.xml", out / "environment/pom.xml")
+        elif case.language == "go":
+            # module files only (pre-fetched at build); the upstream case name drives the
+            # verifier's CGO_ENABLED=1 rule for "sql" cases
+            (out / "environment/gomod").mkdir()
+            for name in ("go.mod", "go.sum"):
+                if (repo / "src" / name).exists():
+                    shutil.copy(repo / "src" / name, out / "environment/gomod" / name)
+            (out / "tests/upstream_case.txt").write_text(repo.name + "\n")
 
         # tests: verifier repo minus the file the agent must write
         shutil.copytree(
