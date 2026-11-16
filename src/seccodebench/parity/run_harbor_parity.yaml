@@ -1,0 +1,22 @@
+# Harbor-side SecCodeBench parity run: Claude Code with the same CLI version and model as the
+# original side (parity/run_original.sh). Generate the parity subset first:
+#   uv run seccodebench --scenarios gen fix --output-dir datasets/seccodebench-parity
+# then: harbor run -c src/seccodebench/parity/run_harbor_parity.yaml
+# ANTHROPIC_API_KEY is read from the environment by the claude-code agent.
+job_name: seccodebench-parity
+jobs_dir: jobs/seccodebench-parity
+n_attempts: 1
+n_concurrent_trials: 4
+
+environment:
+  type: docker
+  delete: true
+
+agents:
+  - name: claude-code
+    model_name: claude-sonnet-5-5   # parity model per PARITY_PLAN.md (smoke tests used claude-haiku-5-5)
+    kwargs:
+      version: "2.1.325"           # keep identical to parity/run_original.sh CLI_VERSION
+
+datasets:
+  - path: datasets/seccodebench-parity

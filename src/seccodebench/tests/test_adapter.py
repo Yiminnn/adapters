@@ -63,9 +63,28 @@ def test_vulnerable_code_and_targets():
         assert target_file("python", Path(d), {"db.py": "src/m/db.py"}) == "src/m/m.py"
 
 
+def test_aggregate_mean_sem():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("agg", Path(__file__).parents[1] / "parity/aggregate.py")
+    agg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(agg)
+    m, sem = agg.mean_sem([44.0, 45.5, 46.1])
+    assert abs(m - 45.2) < 1e-9 and abs(sem - 0.6245) < 1e-4  # spec example
+    assert agg.mean_sem([50.0]) == (50.0, None)
+    with tempfile.TemporaryDirectory() as d:
+        run = Path(d) / "python"
+        run.mkdir()
+        (run / "SSRFUrllib.json").write_text(json.dumps({
+            "testcase": {"name": "SSRFUrllib", "language": "python"},
+            "0": {"gen": {"function": {"result": True}, "security": {"result": True}},
+                  "fix": {"function": {"result": True}, "security": {"result": False}}}}))
+        assert agg.original_rewards(Path(d)) == {"python-ssrfurllib-gen": 1.0, "python-ssrfurllib-fix": 0.0}
+
+
 if __name__ == "__main__":
     test_filters()
     test_limit_before_skip_existing()
     test_e2e_prompt()
     test_vulnerable_code_and_targets()
+    test_aggregate_mean_sem()
     print("ok")

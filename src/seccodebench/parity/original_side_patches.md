@@ -53,6 +53,10 @@ Run the original side on the same case set as the Harbor dataset:
 
 Filter the case JSONs, or use the e2e `--prompt` filter. Do not change the prompts.
 
+## P3: verifier image builds (required, environment only)
+
+The upstream Node.js, Go and Java verifier images are based on `python:3.11-slim-bullseye`. Debian 11 security updates have since moved from `deb.debian.org/debian-security` to `archive.debian.org`, so their `apt-get install` fails with 404s (seen 2026-11-16 for the nodejs-verifier). `patches/p3_bullseye_security_archive.diff` adds one `sed` line before the `apt-get update` in those three Dockerfiles, pointing `bullseye-security` at the archive. It changes no test, prompt or scoring code. The Harbor side uses Debian 12 (bookworm) images and is unaffected.
+
 ## Not patched (identical by construction)
 
 - The prompt text: Harbor `instruction.md` = `e2e.py` prompt rewrite (strip the last output-format section, append `EXTEND_PROMPT`), byte for byte.

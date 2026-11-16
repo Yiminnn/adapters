@@ -76,13 +76,61 @@ Flags: `--output-dir`, `--limit`, `--overwrite`, `--task-ids` (task ids or upstr
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity has not been run. The proposed plan: Claude Code + `claude-sonnet-5-5`, on the `gen` + `fix` subset, 3 runs per side. The original side runs upstream `sec_code_bench.e2e` with the patches in `parity/original_side_patches.md`.
+Parity has not been run yet; the plan (`runs-seccodebench/PARITY_PLAN.md`, posted on PR #101) awaits organizer review.
 
 | Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
 |-------|-------|--------|------|--------------|-----------------------|---------------------|
-| TBD | TBD | func∧sec pass rate | 0 | 52 (Python only) | TBD | TBD |
+| claude-code@2.1.325 | claude-sonnet-5-5 | func∧sec pass rate (%) | TBD | 164 of 328 (gen + fix) | TBD | TBD |
 
-The original side would run `python -m sec_code_bench.e2e` with the same CLI agent against the upstream `docker-compose-verifiers.yml` services.
+Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; dataset PR and HuggingFace parity PR: TBD.
+
+**Reproduction: Harbor side.**
+
+```bash
+cd src/seccodebench
+uv run seccodebench --scenarios gen fix --output-dir ../../datasets/seccodebench-parity
+export ANTHROPIC_API_KEY=...            # read from the environment by the claude-code agent
+harbor run -c parity/run_harbor_parity.yaml   # claude-code@2.1.325, model per the plan
+```
+
+**Reproduction: original side** (upstream E2E mode, same CLI version and model):
+
+```bash
+export ANTHROPIC_API_KEY=...
+src/seccodebench/parity/run_original.sh --model claude-sonnet-5-5 \
+    --cases python:SSTIJinja2Template,nodejs:PathTraversalFsRead,... --scenarios "gen fix" --run-name run1
+```
+
+`run_original.sh` does the following:
+1. Clones `alibaba/sec-code-bench@bf0c4d7` and applies patch P1 (`parity/patches/p1_python_params.diff`).
+2. Writes the P2-filtered case lists.
+3. Starts the upstream verifier services (`docker-compose-verifiers.yml`).
+4. Runs `python -m sec_code_bench.e2e --editor claude-code --cli-model <model> --experiment-cycle 1` inside a runner image (`parity/original-runner.Dockerfile`, same Claude Code installer and version pin as Harbor). Upstream code never runs on the host.
+
+See `parity/original_side_patches.md` for the patches.
+
+**Aggregation.**
+
+```bash
+uv run python parity/aggregate.py --harbor-jobs <job1> <job2> <job3> \
+    --original-runs <run1> <run2> <run3> --json metrics.json --per-task-csv per_task.csv
+```
+
+This computes per-task func∧sec rewards on both sides, each run's pass rate, and mean ± sample SEM. It also checks whether the run ranges overlap, and writes the `metrics` entry for `parity_experiment.json`.
+
+**Smoke test (2026-11-16, n=1, `claude-haiku-5-5`, claude-code 2.1.325, self-funded).** Six tasks, `gen` + `fix` across Python, Node.js and C/C++:
+- Harbor side: jobs `scb-smoke-harbor-haiku6` and `scb-smoke-harbor-haiku-retry4`. Four trials first hit Harbor's 360 s agent-setup timeout while installing Claude Code under load, so they were rerun with `--agent-setup-timeout-multiplier 4`.
+- Original side: `run_original.sh` run `smoke-haiku6`, using upstream verifiers under rootless Podman.
+- Result: all six tasks scored 1 on both sides, and `parity/aggregate.py` matched the per-task ids. The same oracle files also pass the upstream verifiers directly (checked by POST for one case per language).
+- Spend: under $0.10.
+- Local-infrastructure notes for the original side:
+  - Upstream's bullseye-based verifier images need patch P3.
+  - The python-verifier needs `SCB_LOCAL_PODMAN=1` (`parity/compose.local-podman.yml`) on NFS-backed Podman storage.
+
+**Known invocation differences, documented for review:**
+- Harbor's agent calls `claude --verbose --output-format=stream-json --permission-mode=bypassPermissions --print -- <instruction>` with the model in `ANTHROPIC_MODEL`.
+- Upstream calls `claude --model <model> --dangerously-skip-permissions -p <prompt>` with the work directory as cwd.
+- Both run with permissions bypassed, a 300 s agent timeout, and no retry loop.
 
 ## Notes & Caveats
 
