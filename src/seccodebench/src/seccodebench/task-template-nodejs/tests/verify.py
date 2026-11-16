@@ -91,6 +91,10 @@ def main() -> None:
     func_out = sec_out = ""
 
     src = APP / target
+    if src.is_file():  # keep the exact submitted code with the trial (saved under /logs/verifier)
+        keep = LOGS / "submission" / target
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, keep)
     if not src.is_file() or not src.read_text(encoding="utf-8", errors="replace").strip():
         details["error"] = f"No code generated: /app/{target} missing or empty"
     else:

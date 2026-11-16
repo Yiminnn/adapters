@@ -38,6 +38,22 @@ def harbor_rewards(job_dir: Path) -> dict[str, float]:
     return out
 
 
+def harbor_cost_usd(job_dir: Path) -> float:
+    """Sum of Claude Code's own `total_cost_usd` (last stream-json result event per trial).
+    Harbor 0.3.0 leaves result.json agent_result.cost_usd = None for claude-code."""
+    total = 0.0
+    for log in job_dir.glob("*/agent/claude-code.txt"):
+        last = None
+        for line in log.read_text(errors="replace").splitlines():
+            if '"total_cost_usd"' in line:
+                try:
+                    last = float(json.loads(line).get("total_cost_usd") or 0.0)
+                except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+                    continue
+        total += last or 0.0
+    return total
+
+
 def original_rewards(run_dir: Path) -> dict[str, float]:
     out = {}
     for f in run_dir.rglob("*.json"):
@@ -97,6 +113,7 @@ def main() -> None:
     overlap = max(o_scores) >= min(h_scores) and max(h_scores) >= min(o_scores)
     print(json.dumps(metric, indent=2, ensure_ascii=False))
     print(f"tasks={len(tasks)} runs: original={len(o_scores)} harbor={len(h_scores)} ranges_overlap={overlap}")
+    print("harbor agent cost (claude-code total_cost_usd): $%.4f" % sum(harbor_cost_usd(j) for j in a.harbor_jobs))
     if a.json:
         a.json.write_text(json.dumps(metric, indent=2, ensure_ascii=False) + "\n")
     if a.per_task_csv:

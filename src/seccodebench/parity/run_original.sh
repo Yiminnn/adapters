@@ -79,6 +79,7 @@ print(" ".join(args))
 EOF
 )
 LANGS=$(echo "$LANG_ARGS" | grep -oE '[a-z]+:en-US' | cut -d: -f1 | sort -u)
+chmod -R a+rX "$CASE_DIR"   # case data only (no secrets); the runner container's user must read it under umask 077
 
 # 3. verifier services for the needed languages
 declare -A SVC=([python]=python-verifier [nodejs]=nodejs-verifier [cpp]=c-verifier [go]=go-verifier [java]=java-verifier)

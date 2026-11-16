@@ -127,6 +127,14 @@ This computes per-task func∧sec rewards on both sides, each run's pass rate, a
   - Upstream's bullseye-based verifier images need patch P3.
   - The python-verifier needs `SCB_LOCAL_PODMAN=1` (`parity/compose.local-podman.yml`) on NFS-backed Podman storage.
 
+**Smoke test with `claude-sonnet-5-5`** (same 6 tasks, n=1): Harbor job `scb-smoke-harbor-sonnet6` and original run `smoke-sonnet6` both scored 6/6, with per-task agreement 6/6. Harbor-side agent cost by Claude Code's own accounting: $0.147 (Haiku: $0.017).
+
+**What a Harbor trial records** (claude-code agent, Harbor 0.3.0):
+- Agent output: `agent/claude-code.txt` (raw stream-json), the Claude Code session transcript (`agent/sessions/projects/-app/<session>.jsonl`), and an ATIF-v1.2 `agent/trajectory.json` with steps and token totals.
+- `result.json` with `agent_result.n_input_tokens`, `n_cache_tokens` and `n_output_tokens` populated. `cost_usd` is **None**: Harbor 0.3.0's claude-code agent discards Claude Code's `total_cost_usd`. `parity/aggregate.py` recovers it from `claude-code.txt`.
+- The verifier's `reward.txt`, `details.json`, per-suite outputs and `test-stdout.txt`. Each `tests/verify.py` also saves the exact submitted file to `verifier/submission/<target_file>`, since Harbor 0.3.0 collects no artifacts unless the job config lists them.
+- All of this reads back via `harbor view <jobs-folder>` (`/api/jobs/<job>/trials/<trial>`, `/trajectory`, `/verifier-output`). The viewer's `agent-logs` panel is empty for claude-code; the log is in `agent/claude-code.txt`.
+
 **Known invocation differences, documented for review:**
 - Harbor's agent calls `claude --verbose --output-format=stream-json --permission-mode=bypassPermissions --print -- <instruction>` with the model in `ANTHROPIC_MODEL`.
 - Upstream calls `claude --model <model> --dangerously-skip-permissions -p <prompt>` with the work directory as cwd.
