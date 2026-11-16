@@ -117,6 +117,8 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
         "steps": 0,
         "error": None,
     }
+    # Shared with main() so a mid-run failure keeps the partial transcript and usage.
+    _PARTIAL["summary"], _PARTIAL["transcript"] = summary, transcript
 
     async with McpRuntime(args.mcp_url, args.tool_timeout_sec) as runtime:
         if args.seed is not None or args.max_steps or args.max_errors:
@@ -248,6 +250,9 @@ def _extract_env_time(instruction: str) -> str:
     return match.group(1)
 
 
+_PARTIAL: dict[str, Any] = {}
+
+
 def _accumulate_usage(summary: dict[str, Any], message: Any) -> None:
     usage = getattr(message, "usage", None) or {}
     summary["n_input_tokens"] += int(usage.get("prompt_tokens") or 0)
@@ -279,10 +284,9 @@ def main() -> None:
         output = asyncio.run(run_agent(args))
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
-        output = {
-            "summary": {"error": f"{type(exc).__name__}: {exc}", "model": args.model},
-            "transcript": [],
-        }
+        partial_summary = dict(_PARTIAL.get("summary") or {"model": args.model})
+        partial_summary["error"] = f"{type(exc).__name__}: {exc}"
+        output = {"summary": partial_summary, "transcript": list(_PARTIAL.get("transcript") or [])}
     output["summary"]["duration_sec"] = time.time() - started
     # Upstream prices responses from a built-in table; for models it doesn't know it reports 0.
     # Record "unknown" (None) rather than a misleading $0 when tokens were spent.

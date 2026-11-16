@@ -42,7 +42,7 @@ def original_runs(paths: list[Path], keep: set[str] | None) -> dict[int, dict[st
     runs: dict[int, dict[str, float]] = defaultdict(dict)
     for p in paths:
         for s in json.loads(p.read_text())["simulations"]:
-            tid = str(s["task_id"])
+            tid = str(s["task_id"]).lower()  # Harbor dir names are lowercased; compare canonically
             if keep and tid not in keep:
                 continue
             reward = (s.get("reward_info") or {}).get("reward")
@@ -59,7 +59,7 @@ def harbor_runs(job_dirs: list[Path], keep: set[str] | None) -> tuple[dict[int, 
         for trial in sorted(p for p in job.iterdir() if (p / "config.json").is_file()):
             cfg = json.loads((trial / "config.json").read_text())
             task_dir = Path(cfg["task"]["path"]).name  # e.g. vita-cross-10804001
-            tid = re.sub(r"^vita-[a-z]+-", "", task_dir)
+            tid = re.sub(r"^vita-[a-z]+-", "", task_dir).lower()
             if keep and tid not in keep:
                 continue
             idx = int(((cfg.get("agent") or {}).get("kwargs") or {}).get("vita_trial_index") or 0)
@@ -86,11 +86,31 @@ def main() -> None:
     ap.add_argument("--tasks", nargs="*", default=None, help="restrict to these upstream task ids")
     ap.add_argument("--benchmark-name", default="VitaBench")
     ap.add_argument("--metric", default="success_rate")
+    ap.add_argument("--strict", action="store_true",
+                    help="fail instead of restricting to the common task cohort when runs differ")
     args = ap.parse_args()
-    keep = set(args.tasks) if args.tasks else None
+    keep = {t.lower() for t in args.tasks} if args.tasks else None
 
     orig = original_runs(args.original, keep)
     harb, errored = harbor_runs(args.harbor, keep)
+
+    # Every run on both sides must score the same task population, otherwise the runs are
+    # not comparable repetitions. Restrict to the cohort present in all runs (or fail).
+    all_runs = [("original", i, r) for i, r in sorted(orig.items())] + [("harbor", i, r) for i, r in sorted(harb.items())]
+    cohort = set.intersection(*(set(r) for _, _, r in all_runs)) if all_runs else set()
+    union = set().union(*(set(r) for _, _, r in all_runs)) if all_runs else set()
+    if cohort != union:
+        print(f"WARNING: task sets differ across runs/sides: {len(union) - len(cohort)} of {len(union)} tasks "
+              "are missing from at least one run (re-run them).")
+        for side, i, r in all_runs:
+            missing = sorted(union - set(r))
+            if missing:
+                print(f"  {side} run {i} missing {len(missing)}: {', '.join(missing[:10])}")
+        if args.strict:
+            raise SystemExit("aborting (--strict): task cohorts differ")
+        print(f"  -> scoring only the {len(cohort)} tasks present in every run")
+        orig = {i: {t: v for t, v in r.items() if t in cohort} for i, r in orig.items()}
+        harb = {i: {t: v for t, v in r.items() if t in cohort} for i, r in harb.items()}
     o, h = per_run_scores(orig), per_run_scores(harb)
 
     for name, runs in (("original", orig), ("harbor", harb)):
@@ -98,9 +118,6 @@ def main() -> None:
             print(f"{name} run {idx}: {len(r)} tasks, success {100 * sum(r.values()) / len(r):.2f}%")
     if errored:
         print(f"harbor trials excluded (no reward, infra error): {len(errored)}: {', '.join(errored[:10])}")
-    common = set().union(*orig.values()) ^ set().union(*harb.values()) if orig and harb else set()
-    if common:
-        print(f"WARNING: task sets differ between sides ({len(common)} ids only on one side)")
 
     overlap = bool(o and h and max(o) >= min(h) and max(h) >= min(o))
     print(f"original {fmt(o)}  runs={o}")
@@ -114,6 +131,7 @@ def main() -> None:
         "original_runs": o,
         "harbor_runs": h,
     }, indent=2, ensure_ascii=False))
+    print(f"cohort: {len(cohort)} tasks")
 
 
 if __name__ == "__main__":
