@@ -179,9 +179,10 @@ pinned commit is cloned into `.cache/vitabench`.
 
 ## How It Is Graded
 
-The sidecar writes every message (assistant text, tool calls, tool results,
-user messages) to `/logs/agent/vita_runtime_state.json`. The verifier parses it
-into upstream `AssistantMessage`/`UserMessage`/`ToolMessage` objects, builds a
+The sidecar records every message (assistant text, tool calls, tool results,
+user messages). The verifier fetches the conversation from the sidecar
+(`GET http://vita-runtime:8000/state`; it never reads files under `/logs/agent`,
+which the agent could write), parses it into upstream `AssistantMessage`/`UserMessage`/`ToolMessage` objects, builds a
 `SimulationRun`, and calls `evaluate_simulation(evaluation_type="trajectory")`:
 rubrics from `expected_states[*].state_rubrics` and `overall_rubrics` are judged
 over sliding windows of 10 messages (overlap 2) by the evaluator LLM; reward is
@@ -205,8 +206,10 @@ uv run vita-bench --output-dir datasets/vita-bench --overwrite   # re-generate w
 uv run --project src/vita-bench harbor run -p datasets/vita-bench -a oracle
 ```
 
-`solution/solve.sh` replays the stored trajectory into the runtime state file;
-the verifier then scores it with the official evaluator like any agent run.
+`solution/solve.sh` loads the stored trajectory into the sidecar through
+`POST /state`. That endpoint requires a per-task random token that only the
+sidecar image and `solution/` contain, so an agent cannot inject a conversation.
+The verifier then scores the trajectory with the official evaluator, like any agent run.
 
 **Status:** oracle trajectories are not yet built (requires API access; see
 Notes & Caveats).
@@ -223,17 +226,23 @@ mean ± sample SEM over trials.
 |-------|-------|--------|----------------|--------------|--------------------------------|----------------------------|
 | vita-llm-agent@1.0 | TBD | Average Reward | 3 | 400 tasks | TBD | TBD |
 
-Reproduction (original side): clone the pinned commit, create `models.yaml` with
-the same endpoint/model entries the adapter generates (see
-`task-template/environment/runtime-server/vita_models_config.py`), then
+Reproduction:
 
 ```bash
-vita run --domain delivery --user-llm gpt-4.1 --agent-llm <model> --evaluator-llm <evaluator> \
-  --language english --num-trials 3 --max-concurrency 8
-# repeat for instore, ota and delivery,instore,ota (cross-scenario)
+# Original side: upstream `vita run` (pinned commit) in a container, with the same models.yaml generator
+OPENAI_API_KEY=... OPENAI_BASE_URL=... AGENT_MODEL=gpt-4.1 USER_MODEL=gpt-4.1 EVALUATOR_MODEL=<judge> \
+NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cross-10804001 cross_domain parity/original
+
+# Harbor side
+PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench.yaml
+
+# Per-run success rate, mean ± sample SEM, the spec's run-range overlap check, and the metrics JSON
+python3 src/vita-bench/parity/aggregate.py --original parity/original/<save_to> --harbor jobs/<job-id>
 ```
 
-Harbor side: `harbor run -c src/vita-bench/run_vita-bench.yaml` as above.
+Both harnesses were smoke-tested end to end on 2 delivery tasks with
+`claude-haiku-5-5` as agent, user and evaluator. Both sides completed full
+conversations, and both scored 0/2 (haiku does not satisfy every rubric). This only shows that the pipeline works; it is not a parity result.
 
 ## Notes & Caveats
 
@@ -254,6 +263,27 @@ Harbor side: `harbor run -c src/vita-bench/run_vita-bench.yaml` as above.
 - **Reward is binary** and rubric counts range from ~9 (delivery) to ~24
   (cross-scenario) per task, so expected scores are low (paper: ≤32.5% on
   cross-scenario for the best models).
+- **Integrity hardening.** The agent container contains no task definitions:
+  upstream `data/vita/domains/*/tasks*.json`, which hold the hidden user goals and
+  rubrics, are deleted at image build time, and the build fails if any rubric
+  file remains. Oracle replay is token-gated (see Oracle solutions).
+  `configure_run` can only tighten step/error limits, and `record_termination`
+  accepts failure reasons only.
+- **No implicit judge.** `VITA_EVALUATOR_MODEL` has no default. The verifier
+  refuses to grade without it, so both parity sides use the same judge.
+- **Upstream CLI quirk.** `vita run --{agent,user,evaluator}-llm-args` are declared
+  `type=dict` and cannot parse JSON. `run_original.sh` passes per-model args
+  through `models.yaml` instead, exactly as the Harbor side does.
+- **Secrets in upstream results.** Upstream writes the full LLM config,
+  including the `Authorization` header (API key), into its simulation files.
+  `run_original.sh` redacts it inside the container, refuses to copy unredacted
+  output, and restricts the output's permissions.
+- **Runtimes.** Verified on standard Docker (Docker 29 / Compose v5,
+  [fork CI](https://github.com/Yiminnn/adapters/actions/runs/43840868444)).
+  Rootless podman without a systemd user session never runs compose
+  healthchecks, so the sidecar's `service_healthy` dependency never resolves
+  there; this applies to Harbor's `-e podman` too. Daytona support for the
+  sidecar compose stack is still to be confirmed during parity.
 - Tasks with a pre-existing `message_history` are not supported by the runtime
   (none exist in the current release).
 - Chinese task set and the separate VitaBench-2.0 repository are out of scope.
