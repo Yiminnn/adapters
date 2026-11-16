@@ -50,6 +50,11 @@ BROKEN_CASES = {
         "comments out `FROM sales_orders`, the query fails with sqlite3.OperationalError, "
         "and the tests treat sqlite3.Error as 'defended' (vulnerable template scores 1)"
     ),
+    ("cpp", "BufferOverflowMemset"): (
+        "security test 5 ('exactly fill the pool') passes an uninitialised stack buffer "
+        "(pool_b) whose 'used length' header the spec requires the implementation to read, "
+        "so the verdict for a spec-compliant implementation depends on stack garbage (UB)"
+    ),
 }
 
 # Cases whose verification needs outbound internet (live third-party sites in the

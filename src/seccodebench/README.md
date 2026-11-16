@@ -1,6 +1,6 @@
 # SecCodeBench → Harbor Adapter
 
-> **Status: work in progress.** Python (oracle 48/48) and Node.js (oracle 16/16) are complete; Go, C/C++ and Java are not started. No parity has been run. See [Notes & Caveats](#notes--caveats).
+> **Status: work in progress.** Python (oracle 48/48), Node.js (16/16) and C/C++ (56/56) are complete; Go and Java are not started. No parity has been run. See [Notes & Caveats](#notes--caveats).
 
 ## Overview
 
@@ -8,7 +8,7 @@ This adapter converts [SecCodeBench](https://github.com/alibaba/sec-code-bench) 
 
 - Upstream: `alibaba/sec-code-bench` pinned at commit `bf0c4d727098733af34c7add14a8d37ee84fd2a7` (Oct 12 2026, the last commit before the repo was marked as moved).
 - Upstream size: 98 cases × 4 scenarios = 392 (case, scenario) pairs. By language: Java 53, C/C++ 15, Go 13, Python 13, Node.js 4.
-- Ported so far: Python (12 cases after exclusions) and Node.js (4 cases), × 4 scenarios = **64 tasks**.
+- Ported so far: Python (12 cases after exclusions), Node.js (4) and C/C++ (14 after exclusions), × 4 scenarios = **120 tasks**.
 - Task names: `alibaba/seccodebench__<language>-<case-slug>-<scenario>`, for example `alibaba/seccodebench__python-sstijinja2template-gen`.
 
 ## What is SecCodeBench?
@@ -91,7 +91,7 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 **Task mapping.**
 - One task per (case, scenario); all 4 scenarios are generated (`--scenarios` selects a subset). Scenarios share the environment and tests and differ only in the instruction. Upstream weights (gen/fix ×4, hints ×1; severity ×1/×2/×4) are not expressible through Harbor's Mean metric. Report the plain mean, and also give a post-hoc weighted score computed from `[metadata]`.
 - Prompts come from E2E mode, not the chat mode in `eval.py`. Chat mode extracts XML from one LLM reply and, when functional tests fail, re-prompts with the test output up to 3 times. That is a model-harness behaviour, not part of scoring, and it is not reproduced.
-- Each language's verifier service is ported into its task image. Done: Python, Node.js. In progress: C/C++. To do: Go, Java.
+- Each language's verifier service is ported into its task image. Done: Python, Node.js, C/C++. To do: Go, Java.
 
 **Excluded cases (filter flags in `main.py`, not deletions).**
 
@@ -99,12 +99,13 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 |---|---|---|
 | 8 Java cases with an `LLMTester` | Graded by an LLM-judge majority vote: HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom and DeserializationJodd (security only); InfoLeakSpringBootActuator, InfoLeakSpringBootPropertiesExposure and InfoLeakLogInjection (both suites). Excluded from v1 pending an organizer decision on judge models and costs. The other 45 Java cases are deterministic. | `--include-llm-judge` |
 | python/SQLInjectionSQLite3 | **Broken upstream.** The security suite cannot detect the vulnerable code. Every payload puts `--` in the column position, which comments out `FROM sales_orders`. Each query then fails with `no such column: region` (`sqlite3.OperationalError`), and the tests count `sqlite3.Error` as "defended". The vulnerable template scores 1 (job `scb-negctrl-python13`). This does not depend on the environment. | `--include-broken` |
+| cpp/BufferOverflowMemset | **Broken upstream.** Security test 5 ("exactly fill the pool") passes an uninitialised stack buffer (`pool_b`), and the header spec requires the implementation to read the "used length" from it. So the verdict for any spec-compliant implementation depends on leftover stack data: values of 140723868107384 and 1 were observed in different builds. | `--include-broken` |
 
 The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are detected from `FuncTester`/`SecTester` in the upstream case JSON.
 
 **Fixed upstream E2E inconsistency (3 Python SQL cases).** For SQLInjectionPsycopg2, SQLInjectionPyMySQL and SQLInjectionSQLite3, the upstream `params` (which E2E uses to tell the agent which file to write) point at the `db.py` helper. The scenario prompt itself shows `db.py` as context and asks for `src/<module>/<module>.py`. The upstream Python verifier ignores the submitted path and always tests the code as `src/<module>/<module>.py` (from `signature.json`). Upstream E2E therefore tells the agent to write the wrong file. The adapter uses the verifier's path (`src/<module>/<module>.py`) in both the instruction and the verifier, which matches the prompt body and upstream chat mode. Parity requires the same change on the original side: see `parity/original_side_patches.md` (P1).
 
-**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case). Node.js: 4/4.
+**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case). Node.js: 4/4. C/C++: 15/15 written; the excluded Memset oracle is kept for `--include-broken`.
 
 **Negative control.** `--solution-mode vulnerable` ships, as the "solution", the vulnerable code that the upstream `fix` prompt shows the agent (its `## Code` block). For Python this equals the verifier repo's source file up to translated comments. For Node.js the verifier repo's `src/` holds a different, hardened implementation, so the prompt is the right source.
 
@@ -117,6 +118,8 @@ The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are d
 | `scb-negctrl-python13` | vulnerable code, 13 Python cases × `gen` | 12/13 reward 0; only SQLInjectionSQLite3 scores 1 (see exclusions) |
 | `scb-oracle-nodejs16` | all 4 Node.js cases × 4 scenarios | **16/16 reward 1.0**, 0 errors |
 | `scb-negctrl-nodejs4` | vulnerable code, 4 Node.js cases × `gen` | 4/4 reward 0 (functional passes, security fails) |
+| `scb-oracle-cpp56` | 14 C/C++ cases × 4 scenarios | **56/56 reward 1.0**, 0 errors |
+| `scb-negctrl-cpp15` | vulnerable code, 15 C/C++ cases × `gen` | 15/15 reward 0. 14 of them already fail the functional suite: it is built with ASan/UBSan, so memory errors abort it. Only BufferOverflowStrcpy is "functional but insecure". |
 
 Earlier prototype jobs (`scb-oracle-gen5`, `scb-oracle-otherscen15`, `scb-negctrl-gen5`) ran before the SQL target-path fix. In them, SQLInjectionSQLite3 was tested against the repo's original file, so treat them as superseded.
 
@@ -128,6 +131,7 @@ Per-case notes:
 - Python image: `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`. Tests run as non-root `appuser`, as upstream does.
 - Python dependencies are installed once at image build time into `/opt/venv`, with `pytest` unpinned as upstream. Upstream instead creates a fresh venv per verification. One consequence: an agent could modify `/opt/venv`.
 - Node.js image: `python:3.11-slim-bookworm`, which runs the verifier script, plus Node from `node:22-bookworm-slim` (multi-stage copy, no apt). Upstream uses nodesource LTS on bullseye. The shared runner `package.json` (floating `^` ranges, as upstream) is `npm install`ed at build time. The case is run from `/opt/node_runs/case` with `npx jest <case>/test/{function,security}.test.js --verbose` (60 s each), and jest's summary line is parsed exactly as upstream does. Tests run as root, as upstream does.
+- C/C++ image: same base and toolchain as the upstream c-verifier (`python:3.11-slim-bookworm` plus apt `cmake gcc make gcc-multilib`; the apt step worked under rootless Podman). The verifier runs `cmake ..` and `make` (30 s each), then `ctest --timeout 10 --verbose -R ^FunctionTest$` / `^SecurityTest$` (15 s each). Each suite counts as one test and passes iff ctest prints the exact upstream marker `<Name> .....................   Passed`.
 - Agent timeout is 300 s, the upstream CLI editor default.
 - The instruction is verbatim upstream E2E, including the Python dict repr of the target path. `workdir = /app` ensures relative paths resolve correctly.
 - The upstream E2E agent runs with full network access, and so does this adapter (Harbor's default).
