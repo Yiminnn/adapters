@@ -1,0 +1,95 @@
+# Fork-only verification on real Docker (OSC only has rootless podman). Not part of any PR.
+name: docker-verify
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-docker-verify]
+
+env:
+  HARBOR: uvx --from harbor==0.25.0 harbor
+  OPENAI_API_KEY: dummy
+  OPENAI_BASE_URL: http://127.0.0.1:9/v1
+  VITA_EVALUATOR_MODEL: dummy-judge
+
+jobs:
+  vita-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: docker version --format '{{.Server.Version}}' && docker compose version
+      - name: Generate one task
+        working-directory: src/vita-bench
+        run: uv run vita-bench --output-dir "$RUNNER_TEMP/ds" --task-ids vita-delivery-10711001
+      - name: Sidecar integrity (no LLM)
+        run: bash src/vita-bench/scripts/check_runtime_hardening.sh "$RUNNER_TEMP/ds/vita-delivery-10711001"
+      - name: Agent image has no task definitions / rubrics
+        run: |
+          docker build -q -t vita-main "$RUNNER_TEMP/ds/vita-delivery-10711001/environment"
+          docker run --rm vita-main sh -c '! ls /opt/vitabench/data/vita/domains/*/tasks*.json 2>/dev/null && ! grep -rlq evaluation_criteria /opt/vitabench/data && python3 -c "import vita.evaluator.evaluator" && echo OK'
+      - name: nop agent end-to-end (healthcheck path intact)
+        run: |
+          $HARBOR run -y -p "$RUNNER_TEMP/ds" -a nop -e docker -n 1 -i vita-delivery-10711001 --job-name nop || true
+          python3 - <<'PY'
+          import glob, json
+          d = glob.glob("jobs/nop/*/")[0]
+          r = json.load(open(d + "verifier/result.json"))
+          print(r)
+          assert r["status"] == "conversation_not_terminated" and r["reward"] == 0.0, r
+          assert r["state_source"].startswith("http://vita-runtime:8000"), r
+          PY
+      - name: Oracle replay path (token-gated; dummy judge must error the trial, not score 0)
+        run: |
+          cat > "$RUNNER_TEMP/ds/vita-delivery-10711001/solution/oracle_trajectory.json" <<'JSON'
+          {"messages":[{"role":"assistant","content":"Hi! How can I help you today?","turn_idx":0},
+           {"role":"user","content":"Nothing, thanks. ###STOP###","turn_idx":1}],
+           "termination_reason":"user_stop","states":{"old_states":[],"new_states":[]}}
+          JSON
+          $HARBOR run -y -p "$RUNNER_TEMP/ds" -a oracle -e docker -n 1 -i vita-delivery-10711001 --job-name oracle || true
+          python3 - <<'PY'
+          import glob, json, os
+          d = glob.glob("jobs/oracle/*/")[0]
+          oracle_log = open(d + "agent/oracle.txt").read()
+          print(oracle_log[-400:])
+          assert "Replayed oracle trajectory with 2 messages" in oracle_log
+          r = json.load(open(d + "verifier/result.json")); print(r)
+          assert r["status"] == "evaluator_error", r
+          assert not os.path.exists(d + "verifier/reward.txt"), "infra failure must not produce a reward"
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: vita-jobs, path: jobs/, if-no-files-found: ignore }
+
+  seccodebench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: seccodebench-adapter }
+      - uses: astral-sh/setup-uv@v6
+      - name: Generate oracle + negative-control samples
+        working-directory: src/seccodebench
+        run: |
+          IDS="python-codeinjectioneval-gen nodejs-pathtraversalfsread-gen cpp-bufferoverflowarrayaccess-gen"
+          uv run seccodebench --output-dir "$RUNNER_TEMP/ok" --task-ids $IDS
+          uv run seccodebench --output-dir "$RUNNER_TEMP/neg" --task-ids $IDS --solution-mode vulnerable
+      - name: Oracle must score 1, vulnerable code must score 0
+        run: |
+          $HARBOR run -y -p "$RUNNER_TEMP/ok" -a oracle -e docker -n 3 --job-name ok || true
+          $HARBOR run -y -p "$RUNNER_TEMP/neg" -a oracle -e docker -n 3 --job-name neg || true
+          python3 - <<'PY'
+          import glob
+          def rewards(job):
+              out = {}
+              for d in glob.glob(f"jobs/{job}/*/"):
+                  try: out[d.split("/")[-2].rsplit("__", 1)[0]] = float(open(d + "verifier/reward.txt").read())
+                  except FileNotFoundError: out[d] = None
+              return out
+          ok, neg = rewards("ok"), rewards("neg"); print("oracle", ok); print("vulnerable", neg)
+          assert len(ok) == 3 and all(v == 1.0 for v in ok.values()), ok
+          assert len(neg) == 3 and all(v == 0.0 for v in neg.values()), neg
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: seccodebench-jobs, path: jobs/, if-no-files-found: ignore }
