@@ -72,11 +72,11 @@ uv run seccodebench --task-ids SSRFUrllib python-codeinjectioneval-gen --scenari
 uv run seccodebench --solution-mode vulnerable --scenarios gen --output-dir ../../datasets/seccodebench-negctrl
 ```
 
-Flags: `--output-dir`, `--limit`, `--overwrite`, `--task-ids` (task ids or upstream case ids), `--source-dir`, `--languages`, `--scenarios`, `--solution-mode {oracle,vulnerable}`.
+Flags: `--output-dir`, `--limit`, `--overwrite`, `--task-ids` (task ids or upstream case ids), `--source-dir`, `--languages`, `--scenarios`, `--solution-mode {oracle,vulnerable}`, `--include-llm-judge`, `--include-broken`, `--exclude-network-tests`.
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity has not been run. The plan still has to be agreed with the Harbor team.
+Parity has not been run. The proposed plan: Claude Code + `claude-sonnet-5-5`, on the `gen` + `fix` subset, 3 runs per side. The original side runs upstream `sec_code_bench.e2e` with the patches in `parity/original_side_patches.md`.
 
 | Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
 |-------|-------|--------|------|--------------|-----------------------|---------------------|
@@ -91,7 +91,7 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 **Task mapping.**
 - One task per (case, scenario); all 4 scenarios are generated (`--scenarios` selects a subset). Scenarios share the environment and tests and differ only in the instruction. Upstream weights (gen/fix ×4, hints ×1; severity ×1/×2/×4) are not expressible through Harbor's Mean metric. Report the plain mean, and also give a post-hoc weighted score computed from `[metadata]`.
 - Prompts come from E2E mode, not the chat mode in `eval.py`. Chat mode extracts XML from one LLM reply and, when functional tests fail, re-prompts with the test output up to 3 times. That is a model-harness behaviour, not part of scoring, and it is not reproduced.
-- Each language's verifier service is ported into its task image. Done: Python, Node.js. To do: C/C++ (next), Go, Java.
+- Each language's verifier service is ported into its task image. Done: Python, Node.js. In progress: C/C++. To do: Go, Java.
 
 **Excluded cases (filter flags in `main.py`, not deletions).**
 
@@ -102,7 +102,7 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 
 The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are detected from `FuncTester`/`SecTester` in the upstream case JSON.
 
-**Fixed upstream E2E inconsistency (3 Python SQL cases).** For SQLInjectionPsycopg2, SQLInjectionPyMySQL and SQLInjectionSQLite3, the upstream `params` (which E2E uses to tell the agent which file to write) point at the `db.py` helper. The scenario prompt itself shows `db.py` as context and asks for `src/<module>/<module>.py`. The upstream Python verifier ignores the submitted path and always tests the code as `src/<module>/<module>.py` (from `signature.json`). Upstream E2E therefore tells the agent to write the wrong file. The adapter uses the verifier's path (`src/<module>/<module>.py`) in both the instruction and the verifier, which matches the prompt body and upstream chat mode.
+**Fixed upstream E2E inconsistency (3 Python SQL cases).** For SQLInjectionPsycopg2, SQLInjectionPyMySQL and SQLInjectionSQLite3, the upstream `params` (which E2E uses to tell the agent which file to write) point at the `db.py` helper. The scenario prompt itself shows `db.py` as context and asks for `src/<module>/<module>.py`. The upstream Python verifier ignores the submitted path and always tests the code as `src/<module>/<module>.py` (from `signature.json`). Upstream E2E therefore tells the agent to write the wrong file. The adapter uses the verifier's path (`src/<module>/<module>.py`) in both the instruction and the verifier, which matches the prompt body and upstream chat mode. Parity requires the same change on the original side: see `parity/original_side_patches.md` (P1).
 
 **Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case). Node.js: 4/4.
 
@@ -122,7 +122,7 @@ Earlier prototype jobs (`scb-oracle-gen5`, `scb-oracle-otherscen15`, `scb-negctr
 
 Per-case notes:
 - SQLInjectionPyMySQL: the functional mock returns dict rows while the template indexes tuples, so the vulnerable template also fails the functional suite. The oracle handles both row types.
-- SSRFRequests and SSRFUrllib: the functional tests fetch live third-party sites (`jsonplaceholder.typicode.com`, `httpbin.org`), and one security test calls an external redirector (`47.111.235.9`). So these cases need outbound network during verification, and they are flaky if those sites change or go down. The same is true upstream.
+- SSRFRequests and SSRFUrllib: the functional tests fetch live third-party sites (`jsonplaceholder.typicode.com`, `httpbin.org`), and one security test calls an external redirector (`47.111.235.9`). So these cases need outbound network during verification, and they are flaky if those sites change or go down. The same is true upstream. They are listed in `adapter.py: REQUIRES_NETWORK_AT_VERIFY` and tagged `requires_network_at_verify = true` in `task.toml [metadata]`. Every task sets `[environment].allow_internet = true`, because the verifier runs in the task container. Generate without them using `--exclude-network-tests`, and apply the same exclusion on the original side.
 
 **Deviations / environment.**
 - Python image: `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`. Tests run as non-root `appuser`, as upstream does.

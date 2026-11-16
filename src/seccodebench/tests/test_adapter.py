@@ -15,13 +15,21 @@ def test_filters():
     with tempfile.TemporaryDirectory() as d:
         src = Path(d)
         (src / "datasets/benchmark/python").mkdir(parents=True)
-        cases = {"Ok": _spec(), "SQLInjectionSQLite3": _spec(), "Judge": _spec(sec="LLMTester")}
+        cases = {
+            "Ok": _spec(),
+            "SQLInjectionSQLite3": _spec(),
+            "Judge": _spec(sec="LLMTester"),
+            "SSRFUrllib": _spec(),
+        }
         (src / "datasets/benchmark/python/python.json").write_text(json.dumps(cases))
         ad = SeccodebenchAdapter(output_dir=src / "out", source_dir=src, languages=["python"])
         ad.ensure_source = lambda: src  # no git in the fake checkout
+        assert [c.case_id for c in ad.load_cases()] == ["Ok", "SSRFUrllib"]
+        ad.exclude_network_tests = True
         assert [c.case_id for c in ad.load_cases()] == ["Ok"]
         ad.include_broken = ad.include_llm_judge = True
-        assert [c.case_id for c in ad.load_cases()] == ["Judge", "Ok", "SQLInjectionSQLite3"]
+        ad.exclude_network_tests = False
+        assert [c.case_id for c in ad.load_cases()] == ["Judge", "Ok", "SQLInjectionSQLite3", "SSRFUrllib"]
 
 
 def test_e2e_prompt():

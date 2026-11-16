@@ -27,6 +27,7 @@ PROMPT_SUFFIX = {"gen": "", "gen-hints": "Hints", "fix": "Fix", "fix-hints": "Fi
 LANGUAGES = {
     "python": {"json": "python/python.json", "bench": "python_bench"},
     "nodejs": {"json": "nodejs/nodejs.json", "bench": "node_bench"},
+    "cpp": {"json": "cpp/c.json", "bench": "c_bench"},
 }
 SUPPORTED_LANGUAGES = tuple(LANGUAGES)
 
@@ -51,6 +52,13 @@ BROKEN_CASES = {
     ),
 }
 
+# Cases whose verification needs outbound internet (live third-party sites in the
+# functional suite). Kept by default; drop with --exclude-network-tests if they flake.
+REQUIRES_NETWORK_AT_VERIFY = {
+    ("python", "SSRFRequests"): "functional tests fetch https/http://jsonplaceholder.typicode.com/todos/1",
+    ("python", "SSRFUrllib"): "functional tests fetch https/http://httpbin.org/",
+}
+
 TEMPLATE_DIR = Path(__file__).parent / "task-template"
 ORACLE_DIR = Path(__file__).parent / "oracles"
 
@@ -69,7 +77,7 @@ def target_file(language: str, repo: Path, params: dict[str, str]) -> str:
         # verify/core/evaluator.py: get_source_file_path_from_signature (ignores the XML path)
         module = json.loads((repo / "signature.json").read_text(encoding="utf-8"))["module_name"]
         return f"src/{module}/{module}.py"
-    (path,) = params.values()  # nodejs runner: the submitted <path> (src/ prefixed)
+    (path,) = params.values()  # nodejs/cpp runners: the submitted <path> (src/ prefixed)
     return path if path.startswith("src/") else f"src/{path}"
 
 
@@ -117,6 +125,7 @@ class SeccodebenchAdapter:
         solution_mode: str = "oracle",
         include_llm_judge: bool = False,
         include_broken: bool = False,
+        exclude_network_tests: bool = False,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.source_dir = Path(source_dir) if source_dir else None
@@ -128,6 +137,7 @@ class SeccodebenchAdapter:
         self.solution_mode = solution_mode
         self.include_llm_judge = include_llm_judge
         self.include_broken = include_broken
+        self.exclude_network_tests = exclude_network_tests
         for lang in self.languages:
             if lang not in SUPPORTED_LANGUAGES:
                 raise ValueError(f"language {lang!r} not supported yet (have {SUPPORTED_LANGUAGES})")
@@ -154,6 +164,8 @@ class SeccodebenchAdapter:
                 if case.uses_llm_judge and not self.include_llm_judge:
                     continue  # v1 excludes LLM-judge cases (Java only); see README
                 if (lang, cid) in BROKEN_CASES and not self.include_broken:
+                    continue
+                if (lang, cid) in REQUIRES_NETWORK_AT_VERIFY and self.exclude_network_tests:
                     continue
                 cases.append(case)
         return cases
@@ -212,6 +224,9 @@ class SeccodebenchAdapter:
             "{source_commit}": SOURCE_COMMIT,
             "{target_file}": target,
             "{oracle_filename}": Path(target).name,
+            "{requires_network_at_verify}": str(
+                (case.language, case.case_id) in REQUIRES_NETWORK_AT_VERIFY
+            ).lower(),
         }
         for rel in ("task.toml", "tests/test.sh", "solution/solve.sh"):
             p = out / rel
@@ -230,8 +245,8 @@ class SeccodebenchAdapter:
             req = (repo / "requirements.txt").read_text()
             req = re.sub(r"torch==(\d+\.\d+\.\d+)(?!\+)", r"torch==\1+cpu", req)
             (out / "environment/requirements.txt").write_text(req)
-        else:
-            # nodejs: shared runner package.json (same build context for every node task)
+        elif case.language == "nodejs":
+            # shared runner package.json (same build context for every node task)
             shutil.copy(repo.parent / "package.json", out / "environment/package.json")
 
         # tests: verifier repo minus the file the agent must write

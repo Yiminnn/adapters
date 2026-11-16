@@ -26,6 +26,7 @@ case_id = "{case_id}"
 scenario = "{scenario}"
 severity = "{severity}"
 target_file = "{target_file}"
+requires_network_at_verify = {requires_network_at_verify}
 
 [agent]
 timeout_sec = 300.0
@@ -39,3 +40,6 @@ cpus = 2
 memory_mb = 4096
 storage_mb = 10240
 workdir = "/app"
+# The verifier runs in this container; some cases need internet at verify time
+# (see requires_network_at_verify), and the upstream E2E agent also had network.
+allow_internet = true

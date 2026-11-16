@@ -43,6 +43,11 @@ def main() -> None:
         action="store_true",
         help="Also generate cases in BROKEN_CASES (upstream tests verifiably broken)",
     )
+    p.add_argument(
+        "--exclude-network-tests",
+        action="store_true",
+        help="Skip cases in REQUIRES_NETWORK_AT_VERIFY (verifier needs live third-party sites)",
+    )
     args = p.parse_args()
     if args.limit is not None and args.limit < 1:
         p.error("--limit must be >= 1")
@@ -58,6 +63,7 @@ def main() -> None:
         solution_mode=args.solution_mode,
         include_llm_judge=args.include_llm_judge,
         include_broken=args.include_broken,
+        exclude_network_tests=args.exclude_network_tests,
     ).run()
     print(f"Wrote {len(written)} tasks to {args.output_dir}")
 
