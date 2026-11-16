@@ -33,7 +33,7 @@
           "None"
         ],
         "parity_costs": null,
-        "notes": "82 cases x 4 scenarios. Excluded: 8 Java LLM-judge cases (--include-llm-judge) and 8 cases verifiably broken upstream (--include-broken): python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, java XXEDocumentBuilder/XXESAXParser/XXESAXReader/XXETransformerFactory/XXEValidator. Hand-written oracles: 320/328 reward 1 in local Harbor runs; the remaining 8 (2 Java Mockito cases) fail only because of a local rootless-podman attach-socket issue and pass with tmpfs /tmp. No parity yet."
+        "notes": "82 cases x 4 scenarios. Excluded: 8 Java LLM-judge cases (--include-llm-judge) and 8 cases verifiably broken upstream (--include-broken): python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, java XXEDocumentBuilder/XXESAXParser/XXESAXReader/XXETransformerFactory/XXEValidator. Hand-written oracles: 320/328 reward 1 in local Harbor runs; the remaining 8 (2 Java Mockito cases) fail only on rootless podman with NFS-backed storage; verified oracle 1 / vulnerable 0 on standard Docker (fork CI run 43838781966). No parity yet."
       }
     ]
   }
