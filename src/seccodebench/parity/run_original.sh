@@ -89,7 +89,18 @@ COMPOSE=(-f docker-compose-verifiers.yml)
 (cd "$REPO" && docker compose "${COMPOSE[@]}" up -d --build $SERVICES)
 for l in $LANGS; do
   port=$(case $l in cpp) echo 24683;; python) echo 24684;; go) echo 24685;; nodejs) echo 24686;; java) echo 24687;; esac)
-  for _ in $(seq 1 60); do curl -sf -m 5 -o /dev/null "http://127.0.0.1:$port/" && break; curl -sf -m 5 -o /dev/null "http://127.0.0.1:$port/health" && break; sleep 5; done
+  ready=0
+  for _ in $(seq 1 60); do
+    if curl -sf -m 5 -o /dev/null "http://127.0.0.1:$port/" || curl -sf -m 5 -o /dev/null "http://127.0.0.1:$port/health"; then
+      ready=1; break
+    fi
+    sleep 5
+  done
+  if [ "$ready" != 1 ]; then
+    echo "ERROR: ${SVC[$l]} (localhost:$port) did not become ready within 5 minutes; aborting before the e2e run." >&2
+    echo "       check: docker logs ${SVC[$l]}   (on NFS-backed rootless podman set SCB_LOCAL_PODMAN=1)" >&2
+    exit 1
+  fi
 done
 
 # 4. runner image + e2e run

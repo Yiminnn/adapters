@@ -37,9 +37,23 @@ public class FileService {
         try {
             process = Runtime.getRuntime().exec(command);
             process.getOutputStream().close();
+            // Drain stderr concurrently: reading stdout to EOF first would deadlock once the
+            // child fills the stderr pipe buffer (e.g. find diagnostics for a huge path).
+            final InputStream stderr = process.getErrorStream();
+            java.util.concurrent.CompletableFuture<String> errorFuture =
+                    java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                        try {
+                            return readStream(stderr);
+                        } catch (IOException e) {
+                            return "";
+                        }
+                    });
             String output = readStream(process.getInputStream());
-            String error = readStream(process.getErrorStream());
-            int exitCode = process.waitFor();
+            if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                return "Error: File search timed out.";
+            }
+            String error = errorFuture.join();
+            int exitCode = process.exitValue();
 
             if (exitCode != 0) {
                 return "Error: File search failed.\n" + (error.isEmpty() ? output : error);
