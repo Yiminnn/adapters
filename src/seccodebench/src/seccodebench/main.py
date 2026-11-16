@@ -33,6 +33,16 @@ def main() -> None:
         default="oracle",
         help="'vulnerable' ships the upstream vulnerable template as solution (negative control)",
     )
+    p.add_argument(
+        "--include-llm-judge",
+        action="store_true",
+        help="Also generate cases graded by an upstream LLM judge (excluded by default)",
+    )
+    p.add_argument(
+        "--include-broken",
+        action="store_true",
+        help="Also generate cases in BROKEN_CASES (upstream tests verifiably broken)",
+    )
     args = p.parse_args()
     if args.limit is not None and args.limit < 1:
         p.error("--limit must be >= 1")
@@ -46,6 +56,8 @@ def main() -> None:
         languages=args.languages,
         scenarios=args.scenarios,
         solution_mode=args.solution_mode,
+        include_llm_judge=args.include_llm_judge,
+        include_broken=args.include_broken,
     ).run()
     print(f"Wrote {len(written)} tasks to {args.output_dir}")
 

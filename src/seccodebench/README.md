@@ -1,6 +1,6 @@
 # SecCodeBench → Harbor Adapter
 
-> **Status: local feasibility prototype.** Only the Python subset is ported, oracles exist for 5 of 13 Python cases, and no parity has been run. See [Notes & Caveats](#notes--caveats).
+> **Status: work in progress.** Python is complete (oracle 48/48); the Node.js port is in progress; Go, C/C++ and Java are not started. No parity has been run. See [Notes & Caveats](#notes--caveats).
 
 ## Overview
 
@@ -8,7 +8,7 @@ This adapter converts [SecCodeBench](https://github.com/alibaba/sec-code-bench) 
 
 - Upstream: `alibaba/sec-code-bench` pinned at commit `bf0c4d727098733af34c7add14a8d37ee84fd2a7` (Oct 12 2026, the last commit before the repo was marked as moved).
 - Upstream size: 98 cases × 4 scenarios = 392 (case, scenario) pairs. By language: Java 53, C/C++ 15, Go 13, Python 13, Node.js 4.
-- This prototype: Python, 13 cases × 4 scenarios = **52 tasks**.
+- Ported so far: Python (12 cases after exclusions) × 4 scenarios = **48 tasks**, plus Node.js (4 cases, 16 tasks, in progress).
 - Task names: `alibaba/seccodebench__<language>-<case-slug>-<scenario>`, for example `alibaba/seccodebench__python-sstijinja2template-gen`.
 
 ## What is SecCodeBench?
@@ -88,35 +88,48 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 
 **Upstream choice.** The repository says it moved to `alibaba/last-secure-code-benchmark` (LSCBench), but LSCBench is a different benchmark: 450 CVE-derived tasks in 7 languages, with function/file/repo granularities. It is already published as a native Harbor dataset (`last-secure-code-benchmark/last-secure-code-benchmark@v1.0`), so it needs no adapter. This adapter therefore targets the original SecCodeBench at the last commit, `bf0c4d7`.
 
-**Task mapping (proposal for the full adapter).**
-- All 4 scenarios, 98 cases, 392 tasks. Scenarios share the environment and tests and differ only in the instruction. Upstream weights (gen/fix ×4, hints ×1; severity ×1/×2/×4) are not expressible through Harbor's Mean metric. Report the plain mean, and also give a post-hoc weighted score computed from `[metadata]`.
+**Task mapping.**
+- One task per (case, scenario); all 4 scenarios are generated (`--scenarios` selects a subset). Scenarios share the environment and tests and differ only in the instruction. Upstream weights (gen/fix ×4, hints ×1; severity ×1/×2/×4) are not expressible through Harbor's Mean metric. Report the plain mean, and also give a post-hoc weighted score computed from `[metadata]`.
 - Prompts come from E2E mode, not the chat mode in `eval.py`. Chat mode extracts XML from one LLM reply and, when functional tests fail, re-prompts with the test output up to 3 times. That is a model-harness behaviour, not part of scoring, and it is not reproduced.
-- Each language's verifier service must be ported into its task image: Python (done), Go, C/C++, Node.js and Java. Upstream Dockerfiles are under `docker/model/<lang>/`.
+- Each language's verifier service is ported into its task image. Done: Python. In progress: Node.js. To do: Go, C/C++, Java.
 
-**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. Oracles are hand-written (`src/seccodebench/oracles/python/`). Current set: SSTIJinja2Template, CommandInjectionSubprocessRun, DeserializationPyYAML, SQLInjectionSQLite3, CodeInjectionEval. The other 8 Python cases ship a `solve.sh` that exits 1.
+**Excluded cases (filter flags in `main.py`, not deletions).**
 
-**Prototype results (Harbor 0.3.0, rootless Podman 5.4.0, 2026-11-15).**
+| Case(s) | Why | Re-enable with |
+|---|---|---|
+| 8 Java cases with an `LLMTester` | Graded by an LLM-judge majority vote: HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom and DeserializationJodd (security only); InfoLeakSpringBootActuator, InfoLeakSpringBootPropertiesExposure and InfoLeakLogInjection (both suites). Excluded from v1 pending an organizer decision on judge models and costs. The other 45 Java cases are deterministic. | `--include-llm-judge` |
+| python/SQLInjectionSQLite3 | **Broken upstream.** The security suite cannot detect the vulnerable code. Every payload puts `--` in the column position, which comments out `FROM sales_orders`. Each query then fails with `no such column: region` (`sqlite3.OperationalError`), and the tests count `sqlite3.Error` as "defended". The vulnerable template scores 1 (job `scb-negctrl-python13`). This does not depend on the environment. | `--include-broken` |
+
+The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are detected from `FuncTester`/`SecTester` in the upstream case JSON.
+
+**Fixed upstream E2E inconsistency (3 Python SQL cases).** For SQLInjectionPsycopg2, SQLInjectionPyMySQL and SQLInjectionSQLite3, the upstream `params` (which E2E uses to tell the agent which file to write) point at the `db.py` helper. The scenario prompt itself shows `db.py` as context and asks for `src/<module>/<module>.py`. The upstream Python verifier ignores the submitted path and always tests the code as `src/<module>/<module>.py` (from `signature.json`). Upstream E2E therefore tells the agent to write the wrong file. The adapter uses the verifier's path (`src/<module>/<module>.py`) in both the instruction and the verifier, which matches the prompt body and upstream chat mode.
+
+**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case).
+
+**Negative control.** `--solution-mode vulnerable` ships, as the "solution", the vulnerable code that the upstream `fix` prompt shows the agent (its `## Code` block). For Python this equals the verifier repo's source file up to translated comments. For Node.js the verifier repo's `src/` holds a different, hardened implementation, so the prompt is the right source.
+
+**Results (Harbor 0.3.0, rootless Podman 5.4.0, 2026-11-15).**
 
 | Job | Tasks | Result |
 |---|---|---|
-| `scb-oracle-gen5` | 5 oracle cases, `gen` | 5/5 reward 1.0 (Mean 1.000, 0 errors) |
-| `scb-oracle-otherscen15` | same 5 cases, `gen-hints`/`fix`/`fix-hints` | 15/15 reward 1.0 (Mean 1.000, 0 errors) |
-| `scb-negctrl-gen5` | upstream **vulnerable** template as the solution, same 5 cases | Mean 0.200: 4 cases at 0 (functional passes, security fails); SQLInjectionSQLite3 at 1 |
+| `scb-oracle-python48` | all 12 generated Python cases × 4 scenarios | **48/48 reward 1.0**, 0 errors; every suite ran ≥1 test |
+| `scb-oracle-sqlite3-broken` | excluded SQLite3 case, oracle (`--include-broken`) | 1/1 |
+| `scb-negctrl-python13` | vulnerable code, 13 Python cases × `gen` | 12/13 reward 0; only SQLInjectionSQLite3 scores 1 (see exclusions) |
 
-All suites ran real tests: 1–4 functional and 4–6 security tests per case, none skipped.
+Earlier prototype jobs (`scb-oracle-gen5`, `scb-oracle-otherscen15`, `scb-negctrl-gen5`) ran before the SQL target-path fix. In them, SQLInjectionSQLite3 was tested against the repo's original file, so treat them as superseded.
 
-**Upstream bug found: SQLInjectionSQLite3 security suite does not catch the vulnerable code.** Every payload puts `--` in the column position, which comments out `FROM sales_orders`. Each query then fails with `no such column: region` (`sqlite3.OperationalError`), and the tests treat `sqlite3.Error` as "defended". So the vulnerable f-string implementation scores secure, and it would upstream too, since this does not depend on the environment. Candidate for an upstream issue; until then, flag or exclude this case.
-
-**LLM judge (Java only).** `system_config.yaml` requires judge LLMs for Java, but only 8 of the 53 Java cases actually use an `LLMTester`: HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom, InfoLeakSpringBootActuator, InfoLeakSpringBootPropertiesExposure, InfoLeakLogInjection, DeserializationJodd. Five use it for security only (HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom, DeserializationJodd) and three for both suites (the three InfoLeak cases). The verdict is a majority vote across the judge models. The other 45 Java cases are deterministic unit tests.
+Per-case notes:
+- SQLInjectionPyMySQL: the functional mock returns dict rows while the template indexes tuples, so the vulnerable template also fails the functional suite. The oracle handles both row types.
+- SSRFRequests and SSRFUrllib: the functional tests fetch live third-party sites (`jsonplaceholder.typicode.com`, `httpbin.org`), and one security test calls an external redirector (`47.111.235.9`). So these cases need outbound network during verification, and they are flaky if those sites change or go down. The same is true upstream.
 
 **Deviations / environment.**
-- The base image is `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`.
-- Dependencies are installed once at image build time into `/opt/venv`, and `pytest` is unpinned as upstream. Upstream instead creates a fresh venv per verification. One consequence: an agent could modify `/opt/venv`.
+- Python image: `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`. Tests run as non-root `appuser`, as upstream does.
+- Python dependencies are installed once at image build time into `/opt/venv`, with `pytest` unpinned as upstream. Upstream instead creates a fresh venv per verification. One consequence: an agent could modify `/opt/venv`.
 - Agent timeout is 300 s, the upstream CLI editor default.
-- The instruction is verbatim upstream, including the Python dict repr of the target path. `workdir = /app` ensures relative paths resolve correctly.
+- The instruction is verbatim upstream E2E, including the Python dict repr of the target path. `workdir = /app` ensures relative paths resolve correctly.
 - The upstream E2E agent runs with full network access, and so does this adapter (Harbor's default).
 
-**Porting notes for other languages.** Each upstream verifier is a ~550–600 line Python service; Java's is the largest at ~1 MB with case data. The Go verifier runs `go mod tidy` and `goimports` at verify time, so the module cache must be pre-populated in the image (or the verifier given network access). Java uses `mvn test`, so the Maven repository needs to be pre-fetched at build time. The Node.js verifier runs `npm install` once at service build time.
+**Porting notes for other languages.** Each upstream verifier is a ~550–600 line Python service; Java's is the largest at ~1 MB with case data. The Go verifier runs `go mod tidy` and `goimports` at verify time, so the module cache must be pre-populated in the image (or the verifier given network access). Java uses `mvn test`, so the Maven repository needs to be pre-fetched at build time.
 
 ## Installation / Prerequisites
 

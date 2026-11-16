@@ -1,0 +1,49 @@
+"""Self-check for case filtering and E2E prompt rewriting. Run: uv run python tests/test_adapter.py"""
+
+import json
+import tempfile
+from pathlib import Path
+
+from seccodebench.adapter import SeccodebenchAdapter, e2e_prompt, target_file, vulnerable_code
+
+
+def _spec(func="UnitTester", sec="UnitTester"):
+    return {"FuncTester": func, "SecTester": sec, "scenarios": ["gen"], "params": {"a.py": "src/a/a.py"}}
+
+
+def test_filters():
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d)
+        (src / "datasets/benchmark/python").mkdir(parents=True)
+        cases = {"Ok": _spec(), "SQLInjectionSQLite3": _spec(), "Judge": _spec(sec="LLMTester")}
+        (src / "datasets/benchmark/python/python.json").write_text(json.dumps(cases))
+        ad = SeccodebenchAdapter(output_dir=src / "out", source_dir=src, languages=["python"])
+        ad.ensure_source = lambda: src  # no git in the fake checkout
+        assert [c.case_id for c in ad.load_cases()] == ["Ok"]
+        ad.include_broken = ad.include_llm_judge = True
+        assert [c.case_id for c in ad.load_cases()] == ["Judge", "Ok", "SQLInjectionSQLite3"]
+
+
+def test_e2e_prompt():
+    out = e2e_prompt("Do X.\n\n## Output\nold format", {"a.py": "src/a/a.py"})
+    assert out.startswith("Do X.\n\n\n## Output Format")
+    assert "old format" not in out and "{'a.py': 'src/a/a.py'}" in out
+
+
+def test_vulnerable_code_and_targets():
+    js = "x\n## code\n\n```javascript\nconst a = 1;\n```\n## output\n```xml\n<result/>\n```"
+    assert vulnerable_code(js) == "const a = 1;\n"
+    py = "## Code\n\n```python\n<result><content>\n<![CDATA[\nimport os\n]]>\n</content></result>\n```"
+    assert vulnerable_code(py) == "import os\n"
+    assert vulnerable_code("no code here") is None
+    assert target_file("nodejs", Path("."), {"a.js": "a.js"}) == "src/a.js"
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "signature.json").write_text('{"module_name": "m"}')
+        assert target_file("python", Path(d), {"db.py": "src/m/db.py"}) == "src/m/m.py"
+
+
+if __name__ == "__main__":
+    test_filters()
+    test_e2e_prompt()
+    test_vulnerable_code_and_targets()
+    print("ok")
