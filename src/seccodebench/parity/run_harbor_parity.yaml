@@ -7,6 +7,10 @@ job_name: seccodebench-parity
 jobs_dir: jobs/seccodebench-parity
 n_attempts: 1
 n_concurrent_trials: 4
+# Installing Claude Code in a cold task image under load can exceed Harbor's default 360 s
+# agent-setup timeout (4 of 6 smoke trials did); this only lengthens setup, never the agent's
+# 300 s task timeout.
+agent_setup_timeout_multiplier: 4.0
 
 environment:
   type: docker

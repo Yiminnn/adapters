@@ -135,6 +135,8 @@ This computes per-task func∧sec rewards on both sides, each run's pass rate, a
 - The verifier's `reward.txt`, `details.json`, per-suite outputs and `test-stdout.txt`. Each `tests/verify.py` also saves the exact submitted file to `verifier/submission/<target_file>`, since Harbor 0.3.0 collects no artifacts unless the job config lists them.
 - All of this reads back via `harbor view <jobs-folder>` (`/api/jobs/<job>/trials/<trial>`, `/trajectory`, `/verifier-output`). The viewer's `agent-logs` panel is empty for claude-code; the log is in `agent/claude-code.txt`.
 
+**Agent setup timeout.** `parity/run_harbor_parity.yaml` sets `agent_setup_timeout_multiplier: 4.0` (CLI: `--agent-setup-timeout-multiplier 4`). Installing Claude Code into cold task images under load exceeded Harbor's default 360 s setup timeout in 4 of 6 smoke trials. The multiplier only affects setup; the agent's 300 s task timeout is unchanged.
+
 **Known invocation differences, documented for review:**
 - Harbor's agent calls `claude --verbose --output-format=stream-json --permission-mode=bypassPermissions --print -- <instruction>` with the model in `ANTHROPIC_MODEL`.
 - Upstream calls `claude --model <model> --dangerously-skip-permissions -p <prompt>` with the work directory as cwd.
