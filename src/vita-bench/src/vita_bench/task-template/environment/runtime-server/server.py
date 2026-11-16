@@ -406,7 +406,19 @@ class VitaRuntime:
         assistant_message.validate()
         self.messages.append(self._stamp(assistant_message))
         self._finish_step()
-        self._require_active()
+        if self.termination_reason is not None:
+            # Budget ran out on this step: end like the text path does, not with an error.
+            return json.dumps(
+                {
+                    "tool_results": [],
+                    "observation": None,
+                    "termination_reason": self.termination_reason,
+                    "step_count": self.step_count,
+                    "num_errors": self.num_errors,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
         results = self._execute_tool_calls(tool_calls)
         observation = "\n\n".join(r.content or "" for r in results)
         self.last_agent_observation = observation
@@ -441,7 +453,11 @@ class VitaRuntime:
         assistant_message.validate()
         self.messages.append(self._stamp(assistant_message))
         self._finish_step()
-        self._require_active()
+        if self.termination_reason is not None:
+            return (
+                "Conversation ended "
+                f"(termination_reason={self.termination_reason})."
+            )
         results = self._execute_tool_calls([tool_call])
         self.last_agent_observation = results[0].content or ""
         self._write_state()

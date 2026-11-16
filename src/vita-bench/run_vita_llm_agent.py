@@ -194,11 +194,12 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
                 ]
                 for tm in tool_messages:
                     transcript.append({"role": "tool", "name": tm.name, "content": tm.content})
-                message = (
-                    tool_messages[0]
-                    if len(tool_messages) == 1
-                    else MultiToolMessage(role="tool", tool_messages=tool_messages)
-                )
+                if tool_messages:  # empty when the step budget ended on this turn
+                    message = (
+                        tool_messages[0]
+                        if len(tool_messages) == 1
+                        else MultiToolMessage(role="tool", tool_messages=tool_messages)
+                    )
             else:
                 transcript.append({"role": "assistant", "content": agent_msg.content})
                 response = json.loads(
