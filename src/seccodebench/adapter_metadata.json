@@ -1,0 +1,30 @@
+[
+  {
+    "adapter_name": "seccodebench",
+    "adapter_builders": ["yiminnn (yiminliu.career@gmail.com)"],
+    "original_benchmark": [
+      {
+        "split": "full",
+        "size": 392,
+        "harness": "agent",
+        "supported_agents": ["None"],
+        "adaptable": true,
+        "notes": "98 cases (java 53, cpp 15, go 13, python 13, nodejs 4) x 4 scenarios (gen, gen-hints, fix, fix-hints). Upstream E2E mode drives IDE/CLI coding tools (e.g. Claude Code); exact supported agent versions not pinned upstream. 8 Java cases use an LLM-judge tester."
+      }
+    ],
+    "harbor_adapter": [
+      {
+        "split": "full",
+        "adapted_benchmark_size": 52,
+        "parity_benchmark_size": 0,
+        "parity_sampling_rate": 0.0,
+        "registry_benchmark_size": 0,
+        "added_agents": ["None"],
+        "parity_matching_agents": ["None"],
+        "parity_unmatching_agents": ["None"],
+        "parity_costs": null,
+        "notes": "PROTOTYPE: only the Python subset (13 cases x 4 scenarios = 52 tasks) is ported so far; hand-written oracles exist for 5 cases. No parity has been run."
+      }
+    ]
+  }
+]

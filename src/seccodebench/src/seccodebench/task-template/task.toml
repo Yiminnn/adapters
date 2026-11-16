@@ -1,0 +1,41 @@
+version = "1.0"
+
+[task]
+name = "{task_name}"
+description = "SecCodeBench {language} case {case_id} ({scenario} scenario)"
+authors = [
+  { name = "Longfei Chen" },
+  { name = "Ji Zhao" },
+  { name = "Lanxiao Cui" },
+  { name = "Tong Su" },
+  { name = "Xingbo Pan" },
+  { name = "Ziyang Li" },
+  { name = "Yongxing Wu" },
+  { name = "Qijiang Cao" },
+  { name = "Qiyao Cai" },
+  { name = "Jing Zhang" },
+]
+keywords = ["security", "secure-coding", "seccodebench", "{language}", "{scenario}"]
+
+[metadata]
+difficulty = "medium"
+category = "secure-coding"
+tags = ["security", "{language}", "{scenario}", "severity-{severity}"]
+source = "alibaba/sec-code-bench@{source_commit}"
+case_id = "{case_id}"
+scenario = "{scenario}"
+severity = "{severity}"
+target_file = "{target_file}"
+
+[agent]
+timeout_sec = 300.0
+
+[verifier]
+timeout_sec = 300.0
+
+[environment]
+build_timeout_sec = 1200.0
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+workdir = "/app"
