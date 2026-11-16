@@ -131,6 +131,9 @@ class VitaRuntime:
         self._oracle_replay = False
         self._oracle_messages: list[dict[str, Any]] | None = None
         self._oracle_states: dict[str, Any] | None = None
+        # Set when the user simulator (an LLM call) fails. The verifier then errors the trial
+        # instead of scoring an unfinished conversation as 0.
+        self.infra_error: str | None = None
         self._write_state()
 
     # ------------------------------------------------------------- helpers
@@ -167,6 +170,7 @@ class VitaRuntime:
                 else self._dump_states()
             ),
             "oracle_replay": self._oracle_replay,
+            "infra_error": self.infra_error,
         }
 
     def _write_state(self) -> None:
@@ -278,9 +282,14 @@ class VitaRuntime:
         current = incoming
         while True:
             self._require_active()
-            user_message, self.user_state = self.user.generate_next_message(
-                current, self.user_state
-            )
+            try:
+                user_message, self.user_state = self.user.generate_next_message(
+                    current, self.user_state
+                )
+            except Exception as exc:
+                self.infra_error = f"user_simulator: {type(exc).__name__}: {exc}"
+                self._write_state()
+                raise
             user_message.validate()
             self.messages.append(self._stamp(user_message))
             if UserSimulator.is_stop(user_message):

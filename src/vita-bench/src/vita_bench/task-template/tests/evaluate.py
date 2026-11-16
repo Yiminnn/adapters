@@ -175,6 +175,9 @@ def main() -> None:
                 json.dumps(state, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8",
             )
+            if state.get("infra_error"):
+                # The user simulator's LLM call failed: an infrastructure error, not an agent failure.
+                raise RuntimeError(f"vita-runtime reported an infrastructure error: {state['infra_error']}")
             result = _evaluate(config, state)
             result["state_source"] = source
     except Exception as exc:  # noqa: BLE001

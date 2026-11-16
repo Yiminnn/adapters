@@ -28,6 +28,14 @@ from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
+from harbor.models.trajectories.agent import Agent as AtifAgent
+from harbor.models.trajectories.final_metrics import FinalMetrics
+from harbor.models.trajectories.observation import Observation
+from harbor.models.trajectories.observation_result import ObservationResult
+from harbor.models.trajectories.step import Step
+from harbor.models.trajectories.tool_call import ToolCall
+from harbor.models.trajectories.trajectory import Trajectory
+from harbor.utils.trajectory_utils import format_trajectory_json
 
 RUNNER_FILENAME = "run_vita_llm_agent.py"
 MODELS_CONFIG_FILENAME = "vita_models_config.py"
@@ -44,6 +52,7 @@ RUNNER_TARGET_DIR = "/opt/vita-llm-agent"
 INSTRUCTION_TARGET_PATH = "/tmp/vita_llm_agent_instruction.md"
 SUMMARY_FILENAME = "vita-llm-agent-summary.json"
 TRANSCRIPT_FILENAME = "vita-llm-agent-transcript.json"
+TRAJECTORY_FILENAME = "trajectory.json"  # ATIF, read by the Harbor viewer
 DEFAULT_VERSION = "1.0"
 DEFAULT_MAX_STEPS = 300  # vita.config.DEFAULT_MAX_STEPS
 DEFAULT_MAX_ERRORS = 10  # vita.config.DEFAULT_MAX_ERRORS
@@ -117,6 +126,7 @@ class VitaLLMAgent(BaseInstalledAgent):
         )
 
     def populate_context_post_run(self, context: AgentContext) -> None:
+        self._write_atif_trajectory()
         summary_path = self.logs_dir / SUMMARY_FILENAME
         if not summary_path.exists():
             return
@@ -133,6 +143,29 @@ class VitaLLMAgent(BaseInstalledAgent):
             metadata["termination_reason"] = summary.get("termination_reason")
             metadata["vita_trial_index"] = self._vita_trial_index
             context.metadata = metadata
+
+    def _write_atif_trajectory(self) -> None:
+        transcript_path = self.logs_dir / TRANSCRIPT_FILENAME
+        if not transcript_path.exists():
+            return
+        try:
+            summary_path = self.logs_dir / SUMMARY_FILENAME
+            summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
+            instruction_path = self.logs_dir / "vita-llm-agent.instruction.md"
+            trajectory = build_atif_trajectory(
+                transcript=json.loads(transcript_path.read_text(encoding="utf-8")),
+                summary=summary,
+                system_prompt=instruction_path.read_text(encoding="utf-8") if instruction_path.exists() else None,
+                agent_name=self.name(),
+                agent_version=self.version() or DEFAULT_VERSION,
+                model_name=self.model_name,
+                trial_index=self._vita_trial_index,
+            )
+            (self.logs_dir / TRAJECTORY_FILENAME).write_text(
+                format_trajectory_json(trajectory.to_json_dict()), encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail a trial on trajectory export
+            self.logger.warning(f"Failed to write {TRAJECTORY_FILENAME}: {exc}")
 
     def _resolve_runtime_server(self) -> MCPServerConfig:
         servers = [s for s in self.mcp_servers if s.name == "vita-runtime"] or list(
@@ -214,3 +247,77 @@ def _as_float(value: Any) -> float | None:
         return None if value is None else float(value)
     except (TypeError, ValueError):
         return None
+
+
+def build_atif_trajectory(
+    transcript: list[dict[str, Any]],
+    summary: dict[str, Any],
+    system_prompt: str | None,
+    agent_name: str,
+    agent_version: str,
+    model_name: str | None,
+    trial_index: int = 0,
+) -> Trajectory:
+    """Convert the runner transcript (user / assistant / tool turns) to an ATIF trajectory.
+
+    Assistant tool calls and the tool results that follow them become one agent step with
+    an observation; results are paired with calls in order (the runner records them so).
+    """
+    steps: list[Step] = []
+
+    def add(**kwargs: Any) -> Step:
+        step = Step(step_id=len(steps) + 1, **kwargs)
+        steps.append(step)
+        return step
+
+    if system_prompt:
+        add(source="system", message=system_prompt)
+    pending: Step | None = None
+    for entry in transcript:
+        role = entry.get("role")
+        content = entry.get("content")
+        if role == "tool":
+            if pending is None or not pending.tool_calls:
+                add(source="agent", message=f"[tool result without a call] {entry.get('name')}",
+                    extra={"tool_result": content})
+                continue
+            calls = pending.tool_calls
+            results = pending.observation.results if pending.observation else []
+            call = calls[len(results)] if len(results) < len(calls) else calls[-1]
+            results.append(ObservationResult(source_call_id=call.tool_call_id, content=str(content)))
+            pending.observation = Observation(results=results)
+            continue
+        pending = None
+        if role == "user":
+            add(source="user", message=str(content or ""))
+        elif role == "assistant":
+            tool_calls = [
+                ToolCall(
+                    tool_call_id=str(tc.get("id") or f"call_{len(steps) + 1}_{i}"),
+                    function_name=str(tc.get("name")),
+                    arguments=tc.get("arguments") if isinstance(tc.get("arguments"), dict) else {},
+                )
+                for i, tc in enumerate(entry.get("tool_calls") or [])
+            ] or None
+            step = add(source="agent", model_name=model_name, message=str(content or ""), tool_calls=tool_calls)
+            if tool_calls:
+                pending = step
+
+    return Trajectory(
+        session_id=f"vita-{summary.get('seed')}-t{trial_index}",
+        agent=AtifAgent(name=agent_name, version=agent_version, model_name=model_name,
+                        extra={"harness": "upstream vita LLMAgent over MCP"}),
+        steps=steps,
+        final_metrics=FinalMetrics(
+            total_prompt_tokens=summary.get("n_input_tokens"),
+            total_completion_tokens=summary.get("n_output_tokens"),
+            total_cost_usd=summary.get("cost_usd"),
+            total_steps=len(steps),
+        ),
+        extra={
+            "termination_reason": summary.get("termination_reason"),
+            "seed": summary.get("seed"),
+            "vita_trial_index": trial_index,
+            "note": "Agent-side token counts only; user-simulator and evaluator calls are not included.",
+        },
+    )

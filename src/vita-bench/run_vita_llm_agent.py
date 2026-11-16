@@ -284,6 +284,11 @@ def main() -> None:
             "transcript": [],
         }
     output["summary"]["duration_sec"] = time.time() - started
+    # Upstream prices responses from a built-in table; for models it doesn't know it reports 0.
+    # Record "unknown" (None) rather than a misleading $0 when tokens were spent.
+    summary_ = output["summary"]
+    if not summary_.get("cost_usd") and (summary_.get("n_input_tokens") or summary_.get("n_output_tokens")):
+        summary_["cost_usd"] = None
     output["summary"]["metadata"] = {
         "agent": "vita-llm-agent",
         "seed": args.seed,

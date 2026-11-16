@@ -4,8 +4,9 @@
 Original side: one or more upstream simulation batch files written by run_original.sh
 (`simulations[*].{task_id, trial, reward_info.reward}`); each upstream trial is one run.
 Harbor side: one or more Harbor job dirs; each trial's run index is the agent kwarg
-`vita_trial_index`, and its reward is `verifier/reward.txt`. Trials without a reward file
-(infrastructure errors) are reported and excluded, never counted as 0.
+`vita_trial_index`, and its reward is `verifier/reward.txt`. Trials that recorded an exception
+(agent crash, infrastructure error) or have no reward file are reported and excluded, never
+counted as 0. Note that Harbor's own job mean does count them as 0.
 
 Per run, the score is mean reward over tasks x 100 (success rate in %). Prints both sides
 as mean ± sample SEM, the run-range overlap check from the adapter spec, and a ready-to-paste
@@ -63,8 +64,12 @@ def harbor_runs(job_dirs: list[Path], keep: set[str] | None) -> tuple[dict[int, 
                 continue
             idx = int(((cfg.get("agent") or {}).get("kwargs") or {}).get("vita_trial_index") or 0)
             reward_file = trial / "verifier" / "reward.txt"
-            if not reward_file.is_file():
-                errored.append(f"{trial.name} (run {idx})")
+            result_file = trial / "result.json"
+            exc = json.loads(result_file.read_text()).get("exception_info") if result_file.is_file() else None
+            if exc or not reward_file.is_file():
+                # Agent crash / infra failure: exclude (re-run it), never count as 0.
+                why = (exc or {}).get("exception_type") or "no reward"
+                errored.append(f"{trial.name} (run {idx}, {why})")
                 continue
             runs[idx][tid] = float(reward_file.read_text().strip())
     return runs, errored
