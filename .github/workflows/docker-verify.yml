@@ -63,7 +63,7 @@ jobs:
 
   seccodebench:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with: { ref: seccodebench-adapter }
@@ -71,13 +71,13 @@ jobs:
       - name: Generate oracle + negative-control samples
         working-directory: src/seccodebench
         run: |
-          IDS="python-codeinjectioneval-gen nodejs-pathtraversalfsread-gen cpp-bufferoverflowarrayaccess-gen"
+          IDS="python-codeinjectioneval-gen nodejs-pathtraversalfsread-gen cpp-bufferoverflowarrayaccess-gen go-sqlinjectionstd-gen java-deserializationsnakeyaml-gen java-jdbcinjection-gen java-sqlinjectionmybatisorderby-gen"
           uv run seccodebench --output-dir "$RUNNER_TEMP/ok" --task-ids $IDS
           uv run seccodebench --output-dir "$RUNNER_TEMP/neg" --task-ids $IDS --solution-mode vulnerable
       - name: Oracle must score 1, vulnerable code must score 0
         run: |
-          $HARBOR run -y -p "$RUNNER_TEMP/ok" -a oracle -e docker -n 3 --job-name ok || true
-          $HARBOR run -y -p "$RUNNER_TEMP/neg" -a oracle -e docker -n 3 --job-name neg || true
+          $HARBOR run -y -p "$RUNNER_TEMP/ok" -a oracle -e docker -n 4 --job-name ok || true
+          $HARBOR run -y -p "$RUNNER_TEMP/neg" -a oracle -e docker -n 4 --job-name neg || true
           python3 - <<'PY'
           import glob
           def rewards(job):
@@ -87,8 +87,8 @@ jobs:
                   except FileNotFoundError: out[d] = None
               return out
           ok, neg = rewards("ok"), rewards("neg"); print("oracle", ok); print("vulnerable", neg)
-          assert len(ok) == 3 and all(v == 1.0 for v in ok.values()), ok
-          assert len(neg) == 3 and all(v == 0.0 for v in neg.values()), neg
+          assert len(ok) == 7 and all(v == 1.0 for v in ok.values()), ok
+          assert len(neg) == 7 and all(v == 0.0 for v in neg.values()), neg
           PY
       - if: always()
         uses: actions/upload-artifact@v4
