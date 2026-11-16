@@ -284,6 +284,16 @@ conversations, and both scored 0/2 (haiku does not satisfy every rubric). This o
   healthchecks, so the sidecar's `service_healthy` dependency never resolves
   there; this applies to Harbor's `-e podman` too. Daytona support for the
   sidecar compose stack is still to be confirmed during parity.
+- **Model compatibility of upstream code (affects both sides equally).**
+  `vita.utils.llm_utils.kwargs_adapter` hard-codes `thinking: {"type": "disabled"}`
+  for any model whose name contains `claude` when thinking is off. Claude models
+  that reject that value (e.g. `claude-sonnet-5-5`, `claude-opus-5-5`) fail with a
+  400 in every role: agent, user simulator and evaluator. The upstream
+  trajectory evaluator also expects the judge to return a JSON list of objects. A
+  judge that sometimes returns nested lists (seen with `claude-sonnet-5`) crashes
+  evaluation (`'list' object has no attribute 'get'`). Upstream then drops the task
+  after 4 attempts, and the Harbor verifier errors the trial; neither side scores 0.
+  Choose the parity judge after checking that upstream parses its output reliably.
 - Tasks with a pre-existing `message_history` are not supported by the runtime
   (none exist in the current release).
 - Chinese task set and the separate VitaBench-2.0 repository are out of scope.
