@@ -25,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from vita_models_config import write_models_config  # noqa: E402
 
-EVALUATOR_MODEL = os.environ.get("VITA_EVALUATOR_MODEL", "claude-sonnet-4-5")
+# No silent default: the judge model must match the original-side run exactly
+# (upstream's default, anthropic.claude-3.7-sonnet, is a provider-specific name).
+EVALUATOR_MODEL = os.environ.get("VITA_EVALUATOR_MODEL", "").strip()
+if not EVALUATOR_MODEL:
+    sys.exit("VITA_EVALUATOR_MODEL is not set; refusing to grade with an implicit judge model.")
 write_models_config(
     {EVALUATOR_MODEL: os.environ.get("VITA_EVALUATOR_LLM_ARGS_JSON") or None}
 )
