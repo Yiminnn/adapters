@@ -93,15 +93,30 @@ The original side would run `python -m sec_code_bench.e2e` with the same CLI age
 - Prompts come from E2E mode, not the chat mode in `eval.py`. Chat mode extracts XML from one LLM reply and, when functional tests fail, re-prompts with the test output up to 3 times. That is a model-harness behaviour, not part of scoring, and it is not reproduced.
 - Each language's verifier service must be ported into its task image: Python (done), Go, C/C++, Node.js and Java. Upstream Dockerfiles are under `docker/model/<lang>/`.
 
-**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. Oracles are hand-written. Current set: SSTIJinja2Template, CommandInjectionSubprocessRun, DeserializationPyYAML, SQLInjectionSQLite3, CodeInjectionEval. The other 8 Python cases ship a `solve.sh` that exits 1.
+**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. Oracles are hand-written (`src/seccodebench/oracles/python/`). Current set: SSTIJinja2Template, CommandInjectionSubprocessRun, DeserializationPyYAML, SQLInjectionSQLite3, CodeInjectionEval. The other 8 Python cases ship a `solve.sh` that exits 1.
 
-**LLM judge (Java only).** `system_config.yaml` requires judge LLMs for Java, but only 8 of the 53 Java cases actually use an `LLMTester`: HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom, InfoLeakSpringBootActuator, InfoLeakSpringBootPropertiesExposure, InfoLeakLogInjection, DeserializationJodd. Five use it for security only and three for both suites. The verdict is a majority vote across the judge models. The other 45 Java cases are deterministic unit tests.
+**Prototype results (Harbor 0.3.0, rootless Podman 5.4.0, 2026-11-15).**
+
+| Job | Tasks | Result |
+|---|---|---|
+| `scb-oracle-gen5` | 5 oracle cases, `gen` | 5/5 reward 1.0 (Mean 1.000, 0 errors) |
+| `scb-oracle-otherscen15` | same 5 cases, `gen-hints`/`fix`/`fix-hints` | 15/15 reward 1.0 (Mean 1.000, 0 errors) |
+| `scb-negctrl-gen5` | upstream **vulnerable** template as the solution, same 5 cases | Mean 0.200: 4 cases at 0 (functional passes, security fails); SQLInjectionSQLite3 at 1 |
+
+All suites ran real tests: 1–4 functional and 4–6 security tests per case, none skipped.
+
+**Upstream bug found: SQLInjectionSQLite3 security suite does not catch the vulnerable code.** Every payload puts `--` in the column position, which comments out `FROM sales_orders`. Each query then fails with `no such column: region` (`sqlite3.OperationalError`), and the tests treat `sqlite3.Error` as "defended". So the vulnerable f-string implementation scores secure, and it would upstream too, since this does not depend on the environment. Candidate for an upstream issue; until then, flag or exclude this case.
+
+**LLM judge (Java only).** `system_config.yaml` requires judge LLMs for Java, but only 8 of the 53 Java cases actually use an `LLMTester`: HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom, InfoLeakSpringBootActuator, InfoLeakSpringBootPropertiesExposure, InfoLeakLogInjection, DeserializationJodd. Five use it for security only (HardcodedCredentialsOSS, WeakHashMD5SHA1, WeakCryptoAESECB, WeakRandomnessRandom, DeserializationJodd) and three for both suites (the three InfoLeak cases). The verdict is a majority vote across the judge models. The other 45 Java cases are deterministic unit tests.
 
 **Deviations / environment.**
 - The base image is `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`.
 - Dependencies are installed once at image build time into `/opt/venv`, and `pytest` is unpinned as upstream. Upstream instead creates a fresh venv per verification. One consequence: an agent could modify `/opt/venv`.
 - Agent timeout is 300 s, the upstream CLI editor default.
 - The instruction is verbatim upstream, including the Python dict repr of the target path. `workdir = /app` ensures relative paths resolve correctly.
+- The upstream E2E agent runs with full network access, and so does this adapter (Harbor's default).
+
+**Porting notes for other languages.** Each upstream verifier is a ~550–600 line Python service; Java's is the largest at ~1 MB with case data. The Go verifier runs `go mod tidy` and `goimports` at verify time, so the module cache must be pre-populated in the image (or the verifier given network access). Java uses `mvn test`, so the Maven repository needs to be pre-fetched at build time. The Node.js verifier runs `npm install` once at service build time.
 
 ## Installation / Prerequisites
 
