@@ -149,7 +149,12 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
         transcript.append({"role": "user", "content": first_user_text})
 
         steps = 0
-        while True:
+        # The first user turn can already end the run (immediate user stop, or the
+        # step budget spent during start); don't submit an agent turn into a closed run.
+        initial = json.loads(await runtime.call("get_runtime_status"))
+        if initial.get("termination_reason"):
+            summary["termination_reason"] = initial["termination_reason"]
+        while not summary.get("termination_reason"):
             # Same invalid-message retry policy as Orchestrator.step().
             agent_msg = None
             for attempt in range(3):
