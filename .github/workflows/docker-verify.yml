@@ -71,7 +71,7 @@ jobs:
       - name: Generate oracle + negative-control samples
         working-directory: src/seccodebench
         run: |
-          IDS="python-codeinjectioneval-gen nodejs-pathtraversalfsread-gen cpp-bufferoverflowarrayaccess-gen go-sqlinjectionstd-gen java-deserializationsnakeyaml-gen java-jdbcinjection-gen java-sqlinjectionmybatisorderby-gen"
+          IDS="python-codeinjectioneval-gen nodejs-pathtraversalfsread-gen cpp-bufferoverflowarrayaccess-gen go-sqlinjectionstd-gen java-deserializationsnakeyaml-gen java-jdbcinjection-gen java-sqlinjectionmybatisorderby-gen java-jdbcinjection-gen-hints java-jdbcinjection-fix java-jdbcinjection-fix-hints java-sqlinjectionmybatisorderby-gen-hints java-sqlinjectionmybatisorderby-fix java-sqlinjectionmybatisorderby-fix-hints"
           uv run seccodebench --output-dir "$RUNNER_TEMP/ok" --task-ids $IDS
           uv run seccodebench --output-dir "$RUNNER_TEMP/neg" --task-ids $IDS --solution-mode vulnerable
       - name: Oracle must score 1, vulnerable code must score 0
@@ -87,8 +87,8 @@ jobs:
                   except FileNotFoundError: out[d] = None
               return out
           ok, neg = rewards("ok"), rewards("neg"); print("oracle", ok); print("vulnerable", neg)
-          assert len(ok) == 7 and all(v == 1.0 for v in ok.values()), ok
-          assert len(neg) == 7 and all(v == 0.0 for v in neg.values()), neg
+          assert len(ok) == 13 and all(v == 1.0 for v in ok.values()), ok
+          assert len(neg) == 13 and all(v == 0.0 for v in neg.values()), neg
           PY
       - if: always()
         uses: actions/upload-artifact@v4
