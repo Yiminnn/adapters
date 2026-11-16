@@ -79,12 +79,14 @@ jobs:
           $HARBOR run -y -p "$RUNNER_TEMP/ok" -a oracle -e docker -n 4 --job-name ok || true
           $HARBOR run -y -p "$RUNNER_TEMP/neg" -a oracle -e docker -n 4 --job-name neg || true
           python3 - <<'PY'
-          import glob
+          import glob, json
           def rewards(job):
               out = {}
               for d in glob.glob(f"jobs/{job}/*/"):
-                  try: out[d.split("/")[-2].rsplit("__", 1)[0]] = float(open(d + "verifier/reward.txt").read())
-                  except FileNotFoundError: out[d] = None
+                  # Trial dir names are truncated; take the full task id from the trial config.
+                  name = json.load(open(d + "config.json"))["task"]["path"].rstrip("/").split("/")[-1]
+                  try: out[name] = float(open(d + "verifier/reward.txt").read())
+                  except FileNotFoundError: out[name] = None
               return out
           ok, neg = rewards("ok"), rewards("neg"); print("oracle", ok); print("vulnerable", neg)
           assert len(ok) == 13 and all(v == 1.0 for v in ok.values()), ok
