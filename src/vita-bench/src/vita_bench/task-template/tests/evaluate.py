@@ -2,8 +2,8 @@
 """
 VitaBench verifier.
 
-Reads the conversation recorded by the `vita-runtime` sidecar
-(/logs/agent/vita_runtime_state.json), rebuilds the official
+Fetches the conversation recorded by the `vita-runtime` sidecar (GET /state),
+rebuilds the official
 `vita.data_model.simulation.SimulationRun`, and scores it with the official
 `vita.evaluator.evaluate_simulation` (rubric-based sliding-window LLM
 evaluator). The binary reward (1.0 only if every rubric is met) is written to
@@ -128,26 +128,26 @@ def _evaluate(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _load_state(runtime_url: str, runtime_log: Path) -> tuple[dict[str, Any] | None, str]:
-    """Fetch the conversation from the sidecar; fall back to the local log file."""
+def _load_state(runtime_url: str) -> tuple[dict[str, Any] | None, str]:
+    """Fetch the conversation from the sidecar.
+
+    The sidecar is the only trusted source: files under /logs/agent live in the
+    agent's container and could be written by the agent, so they are never read.
+    """
     import urllib.request
 
     try:
         with urllib.request.urlopen(f"{runtime_url}/state", timeout=60) as response:
-            state = json.loads(response.read().decode("utf-8"))
-            if state.get("messages") or not runtime_log.exists():
-                return state, f"{runtime_url}/state"
+            return json.loads(response.read().decode("utf-8")), f"{runtime_url}/state"
     except Exception as exc:  # noqa: BLE001
         print(f"Could not fetch state from {runtime_url}: {exc}", file=sys.stderr)
-    if runtime_log.exists():
-        return json.loads(runtime_log.read_text(encoding="utf-8")), str(runtime_log)
-    return None, ""
+        return None, ""
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--runtime-log", type=Path, required=True)
+    parser.add_argument("--runtime-log", type=Path, default=None, help="Ignored (kept for compatibility).")
     parser.add_argument(
         "--runtime-url",
         default=os.environ.get("VITA_RUNTIME_URL", "http://vita-runtime:8000"),
@@ -159,14 +159,10 @@ def main() -> None:
     config = json.loads(args.config.read_text(encoding="utf-8"))
 
     try:
-        state, source = _load_state(args.runtime_url, args.runtime_log)
+        state, source = _load_state(args.runtime_url)
         if state is None:
-            result = _result(
-                "missing_runtime_log",
-                0.0,
-                note="No conversation state: sidecar unreachable and "
-                f"{args.runtime_log} missing.",
-            )
+            # Infrastructure failure, not an agent failure: error the trial.
+            raise RuntimeError(f"vita-runtime sidecar unreachable at {args.runtime_url}")
         else:
             # Keep a copy with the verifier outputs (Harbor collects this dir).
             saved = args.result.parent / "vita_runtime_state.json"

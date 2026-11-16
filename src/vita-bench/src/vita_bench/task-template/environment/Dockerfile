@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Main (agent) container. It also hosts the verifier, which needs the official
 # VitaBench package to run the rubric evaluator, so install VitaBench here too.

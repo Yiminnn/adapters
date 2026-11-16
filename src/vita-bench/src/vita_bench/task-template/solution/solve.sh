@@ -4,13 +4,13 @@
 # VitaBench ships no reference solutions (grading is a rubric-based LLM judge over
 # the whole conversation), so the adapter stores one validated trajectory per task
 # (see src/vita-bench/oracle/ and scripts/build_oracle.py). The trajectory is
-# loaded into the vita-runtime sidecar (POST /state) so the verifier scores it
-# with the official evaluator exactly like a live agent run; a local copy is also
-# written as a fallback for the verifier.
+# loaded into the vita-runtime sidecar (POST /state, authenticated with the
+# per-task token in /solution/oracle_token) so the verifier scores it with the
+# official evaluator exactly like a live agent run.
 set -euo pipefail
 
 ORACLE="/solution/oracle_trajectory.json"
-STATE_PATH="/logs/agent/vita_runtime_state.json"
+TOKEN_FILE="/solution/oracle_token"
 RUNTIME_URL="${VITA_RUNTIME_URL:-http://vita-runtime:8000}"
 
 if [ ! -f "${ORACLE}" ]; then
@@ -18,13 +18,14 @@ if [ ! -f "${ORACLE}" ]; then
   exit 1
 fi
 
-mkdir -p "$(dirname "${STATE_PATH}")"
-python3 - "${ORACLE}" "${STATE_PATH}" "${RUNTIME_URL}" <<'PYEOF'
+python3 - "${ORACLE}" "${TOKEN_FILE}" "${RUNTIME_URL}" <<'PYEOF'
 import json
 import sys
 import urllib.request
 
-oracle_path, state_path, runtime_url = sys.argv[1:4]
+oracle_path, token_path, runtime_url = sys.argv[1:4]
+with open(token_path, encoding="utf-8") as fp:
+    token = fp.read().strip()
 with open(oracle_path, encoding="utf-8") as fp:
     oracle = json.load(fp)
 
@@ -39,13 +40,10 @@ oracle.setdefault("states", {"old_states": [], "new_states": []})
 oracle["start_tool_called"] = True
 oracle["oracle_replay"] = True
 
-with open(state_path, "w", encoding="utf-8") as fp:
-    json.dump(oracle, fp, indent=2, ensure_ascii=False)
-
 body = json.dumps(oracle).encode("utf-8")
 request = urllib.request.Request(
     f"{runtime_url}/state", data=body, method="POST",
-    headers={"Content-Type": "application/json"},
+    headers={"Content-Type": "application/json", "X-Vita-Oracle-Token": token},
 )
 with urllib.request.urlopen(request, timeout=60) as response:
     print("runtime:", response.read().decode("utf-8"))

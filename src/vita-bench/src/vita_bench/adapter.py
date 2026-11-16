@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -252,7 +253,9 @@ class VitaBenchAdapter:
         content = content.replace("{difficulty}", difficulty)
         (task_dir / "task.toml").write_text(content, encoding="utf-8")
 
-    def _write_runtime_assets(self, task_dir: Path, config: dict[str, Any]) -> None:
+    def _write_runtime_assets(
+        self, task_dir: Path, config: dict[str, Any], oracle_token: str
+    ) -> None:
         runtime_dir = task_dir / "environment" / "runtime-server"
         # The runtime only needs the environment + user scenario, never the rubrics.
         runtime_config = {
@@ -265,6 +268,8 @@ class VitaBenchAdapter:
         }
         runtime_task["evaluation_criteria"] = None
         runtime_config["task"] = runtime_task
+        # The sidecar image is not visible to the agent; neither is solution/.
+        runtime_config["oracle_token"] = oracle_token
         (runtime_dir / "task_config.json").write_text(
             json.dumps(runtime_config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -282,8 +287,11 @@ class VitaBenchAdapter:
         (tests_dir / "test.sh").chmod(0o755)
         (tests_dir / "evaluate.py").chmod(0o755)
 
-    def _write_solution(self, task_dir: Path, vita_task: VitaTask) -> None:
+    def _write_solution(
+        self, task_dir: Path, vita_task: VitaTask, oracle_token: str
+    ) -> None:
         solution_dir = task_dir / "solution"
+        (solution_dir / "oracle_token").write_text(oracle_token, encoding="utf-8")
         oracle_path = self._ORACLE_DIR / vita_task.task_set / f"{vita_task.source_id}.json"
         if oracle_path.exists():
             shutil.copy2(oracle_path, solution_dir / "oracle_trajectory.json")
@@ -299,11 +307,14 @@ class VitaBenchAdapter:
         self._copy_template(task_dir)
 
         config = self._build_runtime_config(vita_task)
+        # Random per generated task: gates the sidecar's oracle-replay endpoint so an
+        # agent cannot inject a fabricated conversation. Regenerating tasks rotates it.
+        oracle_token = secrets.token_hex(32)
         self._write_instruction(task_dir, vita_task)
         self._write_task_toml(task_dir, vita_task)
-        self._write_runtime_assets(task_dir, config)
+        self._write_runtime_assets(task_dir, config, oracle_token)
         self._write_test_assets(task_dir, config)
-        self._write_solution(task_dir, vita_task)
+        self._write_solution(task_dir, vita_task, oracle_token)
 
     def run(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)

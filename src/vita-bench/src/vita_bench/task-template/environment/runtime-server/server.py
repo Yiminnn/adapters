@@ -14,6 +14,7 @@ every step so the verifier can replay it through the official evaluator.
 
 from __future__ import annotations
 
+import hmac
 import inspect
 import json
 import os
@@ -53,6 +54,9 @@ STATE_LOG_PATH = Path(
     os.environ.get("VITA_RUNTIME_STATE_PATH", "/logs/agent/vita_runtime_state.json")
 )
 STOP_TOKEN = "###STOP###"
+# Only failure reasons may be recorded via record_termination; success endings
+# (agent_stop / user_stop) must come from the conversation itself.
+RECORDABLE_TERMINATIONS = {"max_steps", "too_many_errors", "invalid_agent_message"}
 
 mcp = FastMCP("vita-runtime")
 
@@ -90,6 +94,8 @@ class VitaRuntime:
         self.task = Task.model_validate(self.config["task"])
         self.max_steps = int(self.config.get("max_steps") or 300)
         self.max_errors = int(self.config.get("max_errors") or 10)
+        # Secret shared only with solution/ (never visible to the agent); gates POST /state.
+        self.oracle_token = str(self.config.get("oracle_token") or "")
 
         if self.task.message_history:
             raise NotImplementedError(
@@ -304,10 +310,11 @@ class VitaRuntime:
     ) -> str:
         if self.start_tool_called:
             raise RuntimeError("Run must be configured before start_conversation.")
+        # Limits can only be tightened, never loosened beyond the task config.
         if max_steps is not None:
-            self.max_steps = max_steps
+            self.max_steps = min(int(max_steps), self.max_steps)
         if max_errors is not None:
-            self.max_errors = max_errors
+            self.max_errors = min(int(max_errors), self.max_errors)
         if seed is not None:
             self.seed = seed
             self.user.set_seed(seed)
@@ -454,8 +461,11 @@ class VitaRuntime:
         return "Conversation ended."
 
     def record_termination(self, reason: str) -> str:
-        if reason not in {item.value for item in TerminationReason}:
-            raise ValueError(f"Unsupported termination reason: {reason}")
+        if reason not in RECORDABLE_TERMINATIONS:
+            raise ValueError(
+                f"Unsupported termination reason: {reason}. "
+                f"Allowed: {sorted(RECORDABLE_TERMINATIONS)}"
+            )
         self.termination_reason = reason
         self._write_state()
         return self.get_runtime_status()
@@ -533,6 +543,9 @@ async def http_post_state(request: Any) -> Any:
     """Load a stored oracle trajectory (used by the oracle solution)."""
     from starlette.responses import JSONResponse
 
+    supplied = request.headers.get("x-vita-oracle-token", "")
+    if not runtime.oracle_token or not hmac.compare_digest(supplied, runtime.oracle_token):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
     try:
         oracle = await request.json()
         payload = runtime.load_oracle_state(oracle)
