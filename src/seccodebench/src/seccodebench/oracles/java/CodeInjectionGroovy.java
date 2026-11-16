@@ -35,6 +35,7 @@ import org.codehaus.groovy.control.CompilerConfiguration;
 import org.codehaus.groovy.control.SourceUnit;
 import org.codehaus.groovy.control.customizers.CompilationCustomizer;
 import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
+import org.codehaus.groovy.syntax.Types;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -104,6 +105,11 @@ public class ScriptService {
         secure.setPackageAllowed(false);
         secure.setExpressionsWhitelist(ALLOWED_EXPRESSIONS);
         secure.setStatementsWhitelist(ALLOWED_STATEMENTS);
+        // Data-only: no typed declarations (implicit constructor/cast coercion, e.g.
+        // `java.io.File f = ['/x']`), no subscript (getAt/putAt read and write arbitrary
+        // host properties), no `this`/`super` (the Script object). Every reachable value
+        // is then a literal-built number/string/boolean/list/map/range.
+        secure.addExpressionCheckers(ScriptService::isDataOnly);
 
         CompilerConfiguration config = new CompilerConfiguration();
         // Grape's GrabAnnotationTransformation is a *global* AST transform that runs at
@@ -115,6 +121,24 @@ public class ScriptService {
         // local AST transforms such as @ASTTest execute arbitrary code at compile time.
         config.addCompilationCustomizers(new NoAnnotationsCustomizer(), secure);
         return config;
+    }
+
+    private static boolean isDataOnly(Expression expr) {
+        if (expr instanceof DeclarationExpression) {
+            DeclarationExpression decl = (DeclarationExpression) expr;
+            if (decl.isMultipleAssignmentDeclaration()) {
+                return false;
+            }
+            return decl.getVariableExpression().isDynamicTyped();
+        }
+        if (expr instanceof BinaryExpression) {
+            return ((BinaryExpression) expr).getOperation().getType() != Types.LEFT_SQUARE_BRACKET;
+        }
+        if (expr instanceof VariableExpression) {
+            VariableExpression var = (VariableExpression) expr;
+            return !var.isThisExpression() && !var.isSuperExpression();
+        }
+        return true;
     }
 
     /** Rejects user-defined classes and any annotation, at CONVERSION phase. */
