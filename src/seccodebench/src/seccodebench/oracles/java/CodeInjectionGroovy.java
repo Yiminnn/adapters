@@ -22,6 +22,12 @@ import org.codehaus.groovy.ast.expr.TernaryExpression;
 import org.codehaus.groovy.ast.expr.UnaryMinusExpression;
 import org.codehaus.groovy.ast.expr.UnaryPlusExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.EmptyStatement;
+import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.IfStatement;
+import org.codehaus.groovy.ast.stmt.ReturnStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
 import org.codehaus.groovy.classgen.GeneratorContext;
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.CompilePhase;
@@ -32,6 +38,7 @@ import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -40,9 +47,10 @@ import java.util.List;
  * User scripts are compiled in a sandbox that only permits pure expressions
  * (literals, arithmetic/logic/string operators, collections, local variables).
  * Method calls, constructor calls, property access, class references, closures,
- * imports, class/method definitions and annotations (AST transforms) are rejected
- * at compile time, so scripts cannot reach Runtime, ProcessBuilder, reflection,
- * class loaders or metaprogramming.
+ * imports, class/method definitions, annotations (AST transforms) and loops are rejected
+ * at compile time, and Grape's global @Grab transformation is disabled, so scripts cannot
+ * reach Runtime, ProcessBuilder, reflection, class loaders, metaprogramming or remote
+ * dependencies, and always terminate (no loops, closures or methods means no recursion).
  */
 public class ScriptService {
 
@@ -62,6 +70,14 @@ public class ScriptService {
             RangeExpression.class,
             VariableExpression.class,
             DeclarationExpression.class);
+
+    // No While/For/DoWhile/Switch/Try/Throw...: only straight-line code and conditionals.
+    private static final List<Class<? extends Statement>> ALLOWED_STATEMENTS = Arrays.asList(
+            BlockStatement.class,
+            ExpressionStatement.class,
+            ReturnStatement.class,
+            IfStatement.class,
+            EmptyStatement.class);
 
     public Object executeUserScript(String scriptContent) {
         if (scriptContent == null || scriptContent.trim().isEmpty()) {
@@ -87,8 +103,14 @@ public class ScriptService {
         secure.setAllowedStaticStarImports(Collections.emptyList());
         secure.setPackageAllowed(false);
         secure.setExpressionsWhitelist(ALLOWED_EXPRESSIONS);
+        secure.setStatementsWhitelist(ALLOWED_STATEMENTS);
 
         CompilerConfiguration config = new CompilerConfiguration();
+        // Grape's GrabAnnotationTransformation is a *global* AST transform that runs at
+        // CONVERSION (before any customizer) and could fetch a dependency carrying its own
+        // AST transform; disable it outright.
+        config.setDisabledGlobalASTTransformations(
+                new HashSet<>(Collections.singletonList("groovy.grape.GrabAnnotationTransformation")));
         // The no-annotation/no-class guard must run before SEMANTIC_ANALYSIS, where
         // local AST transforms such as @ASTTest execute arbitrary code at compile time.
         config.addCompilationCustomizers(new NoAnnotationsCustomizer(), secure);

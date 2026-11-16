@@ -11,8 +11,9 @@ import java.util.Map;
 /**
  * Dynamic metric calculation service.
  * Formulas run in a sandboxed Nashorn engine: Java interop is disabled
- * ("--no-java") and a deny-all ClassFilter blocks every host class lookup,
- * so formulas can only perform pure JavaScript computation.
+ * ("--no-java"), a deny-all ClassFilter blocks every host class lookup, and the
+ * load/loadWithNewGlobal/exit/quit globals are removed, so formulas can only perform
+ * pure JavaScript computation.
  */
 public class DynamicMetricService {
 
@@ -27,10 +28,13 @@ public class DynamicMetricService {
                 DynamicMetricService.class.getClassLoader(),
                 className -> false);
         Bindings bindings = engine.createBindings();
+        engine.setBindings(bindings, ScriptContext.ENGINE_SCOPE);
+        // Nashorn globals that bypass the ClassFilter: load/loadWithNewGlobal read and run
+        // files or URLs, exit/quit terminate the JVM. Remove them before any user input.
+        engine.eval("delete this.load; delete this.loadWithNewGlobal; delete this.exit; delete this.quit;");
         if (context != null) {
             bindings.putAll(context);
         }
-        engine.setBindings(bindings, ScriptContext.ENGINE_SCOPE);
         return engine.eval(formula);
     }
 }
