@@ -19,7 +19,7 @@
     "harbor_adapter": [
       {
         "split": "full",
-        "adapted_benchmark_size": 48,
+        "adapted_benchmark_size": 64,
         "parity_benchmark_size": 0,
         "parity_sampling_rate": 0.0,
         "registry_benchmark_size": 0,
@@ -33,7 +33,7 @@
           "None"
         ],
         "parity_costs": null,
-        "notes": "WORK IN PROGRESS: Python ported (12 cases x 4 scenarios = 48 tasks; SQLInjectionSQLite3 excluded as broken upstream); Node.js port in progress; Go/C++/Java pending. 8 Java LLM-judge cases excluded by default (--include-llm-judge). No parity yet."
+        "notes": "WORK IN PROGRESS: Python (12 cases; SQLInjectionSQLite3 excluded as broken upstream) and Node.js (4 cases) ported, x 4 scenarios = 64 tasks, oracle 64/64. Go/C++/Java pending. 8 Java LLM-judge cases excluded by default (--include-llm-judge). No parity yet."
       }
     ]
   }
