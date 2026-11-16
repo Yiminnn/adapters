@@ -103,6 +103,16 @@ REQUIRES_NETWORK_AT_VERIFY = {
     },
 }
 
+# Outer verifier timeout per language: must cover the sum of the upstream per-suite limits
+# run sequentially in tests/verify.py, plus setup (copy, clean, build).
+VERIFIER_TIMEOUT_SEC = {
+    "python": 300.0,  # 2 x 25 s pytest
+    "nodejs": 300.0,  # 2 x 60 s jest
+    "cpp": 300.0,  # cmake 30 + make 30 + 2 x 15 s ctest
+    "go": 420.0,  # go mod tidy 30 + goimports <=30/file + 2 x 60 s go test (+ cgo builds)
+    "java": 720.0,  # 2 x 300 s mvn test + mvn clean x2 + setup
+}
+
 TEMPLATE_DIR = Path(__file__).parent / "task-template"
 ORACLE_DIR = Path(__file__).parent / "oracles"
 
@@ -235,8 +245,9 @@ class SeccodebenchAdapter:
         return f"{case.language}-{slug(case.case_id)}-{scenario}"
 
     # ---------------------------------------------------------------- generate
-    def run(self) -> list[Path]:
-        written = []
+    def selected(self) -> list[tuple[Case, str, str]]:
+        """(case, scenario, task id) in stable order, after --task-ids and --limit."""
+        sel = []
         for case in self.load_cases():
             for scenario in self.scenarios:
                 if scenario not in case.spec["scenarios"]:
@@ -244,15 +255,19 @@ class SeccodebenchAdapter:
                 tid = self.task_id(case, scenario)
                 if self.task_ids and not ({tid, case.case_id.lower()} & self.task_ids):
                     continue
-                if self.limit is not None and len(written) >= self.limit:
-                    return written
-                out = self.output_dir / tid
-                if out.exists():
-                    if not self.overwrite:
-                        continue
-                    shutil.rmtree(out)
-                self.write_task(case, scenario, tid, out)
-                written.append(out)
+                sel.append((case, scenario, tid))
+        return sel if self.limit is None else sel[: self.limit]
+
+    def run(self) -> list[Path]:
+        written = []
+        for case, scenario, tid in self.selected():  # --limit applies before skip-existing
+            out = self.output_dir / tid
+            if out.exists():
+                if not self.overwrite:
+                    continue
+                shutil.rmtree(out)
+            self.write_task(case, scenario, tid, out)
+            written.append(out)
         return written
 
     def write_task(self, case: Case, scenario: str, tid: str, out: Path) -> None:
@@ -285,6 +300,7 @@ class SeccodebenchAdapter:
             "{source_commit}": SOURCE_COMMIT,
             "{target_file}": target,
             "{oracle_filename}": Path(target).name,
+            "{verifier_timeout_sec}": str(VERIFIER_TIMEOUT_SEC[case.language]),
             "{requires_network_at_verify}": str(
                 (case.language, case.case_id) in REQUIRES_NETWORK_AT_VERIFY
             ).lower(),

@@ -140,6 +140,20 @@ Per-case notes:
 - SQLInjectionPyMySQL: the functional mock returns dict rows while the template indexes tuples, so the vulnerable template also fails the functional suite. The oracle handles both row types.
 - SSRFRequests and SSRFUrllib: the functional tests fetch live third-party sites (`jsonplaceholder.typicode.com`, `httpbin.org`), and one security test calls an external redirector (`47.111.235.9`). So these cases need outbound network during verification, and they are flaky if those sites change or go down. The same is true upstream. They are listed in `adapter.py: REQUIRES_NETWORK_AT_VERIFY` and tagged `requires_network_at_verify = true` in `task.toml [metadata]`. Every task sets `[environment].allow_internet = true`, because the verifier runs in the task container. Generate without them using `--exclude-network-tests`, and apply the same exclusion on the original side.
 
+**Weak upstream security tests (kept, documented).** These tests can't fully separate secure from vulnerable code. The oracles are still hardened properly.
+- Java XSSSpringMVC, SSTIVelocity and DeserializationFlexjson: the security tests also pass whenever the code under test throws, so an implementation that rejects or crashes on the payload counts as secure.
+- Java SSTIVelocity: the test's ScriptEngine-based payload can't execute on JDK 17, which has no bundled JavaScript engine, so that path can never detect a vulnerability.
+- Go SSRF: the DecimalIP, file:// and gopher:// tests pass even for the vulnerable code, and the DNSRebinding test only logs.
+- Go Otto/Goja: the NoProcessAccess tests pass on vulnerable code; only the infinite-loop test catches it.
+- Go XSSReflect: the JS-context tests only inspect `<script>` blocks, so they pass trivially when there are none.
+- Go SQLInjectionBeego: the "vulnerable" fix-prompt code is not actually injectable; it fails only on a functional bug.
+- C/C++: the Sprintf API has no output-size parameter, VLA's `field_sizes` length is unspecified, and Strcpy's empty-string test is commented out.
+
+**Oracle hardening after review (PR #101).**
+- python/SSRFRequests and SSRFUrllib now validate and dial the same resolved address at connect time, closing the DNS-rebinding gap; TLS SNI and the Host header keep the hostname. Checked with a rebinding test: the previous version reached 127.0.0.1, the new one refuses.
+- nodejs/PathTraversalFsWrite, java/PathTraversalWrite and java/ZipSlip now check real-path containment of the deepest existing ancestor before creating any directory, create directories one level at a time, and don't follow a leaf symlink. Checked with symlinked-ancestor attacks: the previous Node version wrote outside the root, the new ones refuse.
+- The Go SSRF oracles already dial the validated address; Java Apache HttpClient and OkHttp validate inside the client's DNS resolver. The Java HttpURLConnection-based SSRF oracles (CommonsIO, ImageIO, Jsoup, RestTemplate, URLConnection) validate with `InetAddress.getAllByName`, and the connect reuses that answer from the JVM's positive DNS cache. The residual race (cache expiry exactly between check and connect) is documented, not eliminated: JDK 17 has no resolver hook for HttpURLConnection.
+
 **Deviations / environment.**
 - Python image: `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`. Tests run as non-root `appuser`, as upstream does.
 - Python dependencies are installed once at image build time into `/opt/venv`, with `pytest` unpinned as upstream. Upstream instead creates a fresh venv per verification. One consequence: an agent could modify `/opt/venv`.

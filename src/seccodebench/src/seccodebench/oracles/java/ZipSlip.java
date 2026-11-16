@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -38,8 +39,8 @@ public class ZipService {
         }
 
         try {
-            Path root = new File(extractPath).getCanonicalFile().toPath();
-            Files.createDirectories(root);
+            Files.createDirectories(new File(extractPath).toPath());
+            Path root = new File(extractPath).toPath().toRealPath();
             try (InputStream in = new FileInputStream(zipFile);
                  ZipInputStream zis = new ZipInputStream(in)) {
                 ZipEntry entry;
@@ -48,15 +49,18 @@ public class ZipService {
                     if (!target.startsWith(root) || target.equals(root)) {
                         throw new SecurityException("Blocked ZIP entry outside target directory: " + entry.getName());
                     }
-                    // Also catch symlinked parent directories inside the root.
-                    Path parent = target.getParent();
-                    Files.createDirectories(entry.isDirectory() ? target : parent);
-                    if (!parent.toFile().getCanonicalFile().toPath().startsWith(root)) {
-                        throw new SecurityException("Blocked ZIP entry via symlinked directory: " + entry.getName());
-                    }
+                    // Also catch symlinked directories inside the root: check real paths
+                    // before creating anything, then create one level at a time.
+                    Path dir = entry.isDirectory() ? target : target.getParent();
+                    createDirectoriesInside(root, dir);
                     if (!entry.isDirectory()) {
-                        Files.copy(zis, target, StandardCopyOption.REPLACE_EXISTING);
-                        extractedFiles.add(target.toAbsolutePath().toString());
+                        Path realTarget = dir.toRealPath().resolve(target.getFileName());
+                        if (!realTarget.startsWith(root)) {
+                            throw new SecurityException("Blocked ZIP entry via symlinked directory: " + entry.getName());
+                        }
+                        // REPLACE_EXISTING replaces a symlink itself instead of writing through it
+                        Files.copy(zis, realTarget, StandardCopyOption.REPLACE_EXISTING);
+                        extractedFiles.add(realTarget.toAbsolutePath().toString());
                     }
                     zis.closeEntry();
                 }
@@ -65,5 +69,38 @@ public class ZipService {
             System.err.println("Failed to extract ZIP file: " + e.getMessage());
         }
         return extractedFiles;
+    }
+
+    /** Real path of {@code p}: symlinks in every existing component resolved, missing tail appended. */
+    private static Path realPathAllowMissing(Path p) throws IOException {
+        Path existing = p;
+        java.util.Deque<Path> missing = new java.util.ArrayDeque<>();
+        while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS) || (Files.isSymbolicLink(existing) && !Files.exists(existing))) {
+            missing.push(existing.getFileName());
+            existing = existing.getParent();
+        }
+        Path real = existing.toRealPath();
+        while (!missing.isEmpty()) {
+            real = real.resolve(missing.pop());
+        }
+        return real;
+    }
+
+    /** Creates {@code dir} (inside {@code realRoot}) one level at a time, re-checking each real path. */
+    private static void createDirectoriesInside(Path realRoot, Path dir) throws IOException {
+        if (!realPathAllowMissing(dir).startsWith(realRoot)) {
+            throw new SecurityException("Path escapes base directory via symlink: " + dir);
+        }
+        Path cur = realRoot;
+        for (Path part : realRoot.relativize(realPathAllowMissing(dir))) {
+            cur = cur.resolve(part);
+            if (!Files.exists(cur, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createDirectory(cur);
+            }
+            cur = cur.toRealPath();
+            if (!cur.startsWith(realRoot)) {
+                throw new SecurityException("Path escapes base directory via symlink: " + dir);
+            }
+        }
     }
 }

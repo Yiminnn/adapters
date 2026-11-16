@@ -3,16 +3,31 @@ const path = require('path');
 
 const BASE_DIR = '/tmp/resources';
 
-function assertInside(base, target) {
-    if (target !== base && !target.startsWith(base + path.sep)) {
-        throw new Error('Path traversal detected');
+function isInside(base, target) {
+    return target === base || target.startsWith(base + path.sep);
+}
+
+/**
+ * Real path of `dir` with every existing component's symlinks resolved; missing trailing
+ * components are appended lexically. Lets us check containment BEFORE creating anything.
+ */
+function realpathAllowMissing(dir) {
+    const missing = [];
+    let cur = dir;
+    while (!fs.existsSync(cur)) {
+        missing.unshift(path.basename(cur));
+        cur = path.dirname(cur);
     }
+    return path.join(fs.realpathSync(cur), ...missing);
 }
 
 /**
  * Save a data snapshot to `/tmp/resources/<category>/<fileName>`.
- * Both the category directory and the final file must resolve inside BASE_DIR
- * (symlinks in existing path components are resolved before writing).
+ *
+ * Containment is checked on real paths (symlinks in any existing component of category or
+ * fileName are resolved) before any directory is created; directories are then created one
+ * level at a time, each re-checked, and the file is opened with O_NOFOLLOW so a symlinked
+ * leaf cannot redirect the write.
  * @param {string} category
  * @param {string} fileName
  * @param {string} data
@@ -28,29 +43,45 @@ function saveDataSnapshot(category, fileName, data) {
         throw new Error('Data must be a string');
     }
 
-    const base = path.resolve(BASE_DIR);
-    const snapshotDir = path.resolve(base, category);
+    fs.mkdirSync(BASE_DIR, { recursive: true });
+    const realBase = fs.realpathSync(BASE_DIR);
+    const snapshotDir = path.resolve(realBase, category);
     const filePath = path.resolve(snapshotDir, fileName);
-    if (snapshotDir === base) {
-        throw new Error('Category must name a sub-directory');
+    if (snapshotDir === realBase || !isInside(realBase, snapshotDir) || !isInside(snapshotDir, filePath)) {
+        throw new Error('Path traversal detected');
     }
-    assertInside(base, snapshotDir);
-    assertInside(snapshotDir, filePath);
-
-    fs.mkdirSync(snapshotDir, { recursive: true });
-    const realBase = fs.realpathSync(base);
-    const realDir = fs.realpathSync(snapshotDir);
-    assertInside(realBase, realDir);
-    const realFile = path.join(realDir, path.relative(snapshotDir, filePath));
-    if (fs.existsSync(realFile) && fs.lstatSync(realFile).isSymbolicLink()) {
-        throw new Error('Refusing to write through a symbolic link');
+    const parent = path.dirname(filePath);
+    if (!isInside(realBase, realpathAllowMissing(parent))) {
+        throw new Error('Path traversal detected (symlink escape)');
     }
-    assertInside(realDir, realFile);
 
+    // create missing directories one level at a time, re-validating each real path
+    const rel = path.relative(realBase, parent).split(path.sep).filter(Boolean);
+    let cur = realBase;
+    for (const part of rel) {
+        cur = path.join(cur, part);
+        if (!fs.existsSync(cur)) {
+            fs.mkdirSync(cur);
+        }
+        cur = fs.realpathSync(cur);
+        if (!isInside(realBase, cur)) {
+            throw new Error('Path traversal detected (symlink escape)');
+        }
+    }
+
+    const target = path.join(cur, path.basename(filePath));
+    let fd;
     try {
-        fs.writeFileSync(realFile, data, 'utf8');
+        fd = fs.openSync(
+            target,
+            fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW,
+            0o644
+        );
+        fs.writeFileSync(fd, data, 'utf8');
     } catch (error) {
         throw new Error(`Failed to write snapshot file: ${error.message}`);
+    } finally {
+        if (fd !== undefined) fs.closeSync(fd);
     }
 }
 

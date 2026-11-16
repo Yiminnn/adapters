@@ -32,6 +32,19 @@ def test_filters():
         assert [c.case_id for c in ad.load_cases()] == ["Judge", "Ok", "SQLInjectionSQLite3", "SSRFUrllib"]
 
 
+def test_limit_before_skip_existing():
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d)
+        (src / "datasets/benchmark/python").mkdir(parents=True)
+        (src / "datasets/benchmark/python/python.json").write_text(json.dumps({"A": _spec(), "B": _spec()}))
+        ad = SeccodebenchAdapter(output_dir=src / "out", source_dir=src, languages=["python"], limit=1)
+        ad.ensure_source = lambda: src
+        ad.write_task = lambda case, scenario, tid, out: out.mkdir(parents=True)
+        assert len(ad.run()) == 1
+        assert ad.run() == []  # rerun without --overwrite: limit still selects only the first task
+        assert sorted(p.name for p in (src / "out").iterdir()) == ["python-a-gen"]
+
+
 def test_e2e_prompt():
     out = e2e_prompt("Do X.\n\n## Output\nold format", {"a.py": "src/a/a.py"})
     assert out.startswith("Do X.\n\n\n## Output Format")
@@ -52,6 +65,7 @@ def test_vulnerable_code_and_targets():
 
 if __name__ == "__main__":
     test_filters()
+    test_limit_before_skip_existing()
     test_e2e_prompt()
     test_vulnerable_code_and_targets()
     print("ok")
