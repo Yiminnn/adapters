@@ -12,11 +12,15 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# The agent shares this container, so the task definitions (hidden user goals and grading
+# rubrics) are deleted after install; the verifier gets its task via /tests/config.json.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && git clone "${VITABENCH_REPO}" "${VITABENCH_ROOT}" \
     && git -C "${VITABENCH_ROOT}" checkout "${VITABENCH_COMMIT}" \
     && rm -rf "${VITABENCH_ROOT}/.git" \
     && pip install --no-cache-dir -e "${VITABENCH_ROOT}" \
+    && rm -f "${VITABENCH_ROOT}"/data/vita/domains/*/tasks*.json \
+    && ! grep -rlq "evaluation_criteria" "${VITABENCH_ROOT}/data" \
     && apt-get purge -y --auto-remove git \
     && rm -rf /var/lib/apt/lists/*
 

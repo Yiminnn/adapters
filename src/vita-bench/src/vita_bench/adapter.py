@@ -44,7 +44,8 @@ class VitaBenchAdapter:
     # Pinned upstream commit; keep in sync with task-template/environment/*/Dockerfile.
     _VITABENCH_COMMIT = "742e240855bf8686a0842360749d5ea970ea3987"
     _TEMPLATE_DIR = Path(__file__).parent / "task-template"
-    _ORACLE_DIR = Path(__file__).parent / "oracle"
+    # Same directory scripts/build_oracle.py writes to: src/vita-bench/oracle/<set>/<id>.json
+    _ORACLE_DIR = Path(__file__).resolve().parents[2] / "oracle"
     _DEFAULT_LANGUAGE = "english"
 
     # Official task sets. `env_domain` is the --domain value used by the original

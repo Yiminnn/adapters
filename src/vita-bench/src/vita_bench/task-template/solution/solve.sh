@@ -21,6 +21,7 @@ fi
 python3 - "${ORACLE}" "${TOKEN_FILE}" "${RUNTIME_URL}" <<'PYEOF'
 import json
 import sys
+import time
 import urllib.request
 
 oracle_path, token_path, runtime_url = sys.argv[1:4]
@@ -39,6 +40,17 @@ if oracle["termination_reason"] not in {"agent_stop", "user_stop"}:
 oracle.setdefault("states", {"old_states": [], "new_states": []})
 oracle["start_tool_called"] = True
 oracle["oracle_replay"] = True
+
+# Wait for the sidecar (healthchecks are not honoured by every runtime).
+deadline = time.time() + 300
+while True:
+    try:
+        urllib.request.urlopen(f"{runtime_url}/health", timeout=5).read()
+        break
+    except OSError:
+        if time.time() > deadline:
+            raise SystemExit(f"vita-runtime not reachable at {runtime_url} after 300s")
+        time.sleep(2)
 
 body = json.dumps(oracle).encode("utf-8")
 request = urllib.request.Request(

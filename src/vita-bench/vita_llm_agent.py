@@ -189,7 +189,9 @@ class VitaLLMAgent(BaseInstalledAgent):
         if self._llm_args_json:
             parts.extend(["--llm-args-json", shlex.quote(self._llm_args_json)])
         command = " ".join(parts)
-        return f"{command} 2>&1 | tee /logs/agent/vita-llm-agent.txt"
+        # pipefail: keep the runner's exit status (Harbor also prefixes it; this keeps the
+        # command correct when run on its own).
+        return f"set -o pipefail; {command} 2>&1 | tee /logs/agent/vita-llm-agent.txt"
 
     def _effective_seed(self) -> int | None:
         """Mirror vita.run.run_tasks: random.seed(seed); one randint per trial."""
