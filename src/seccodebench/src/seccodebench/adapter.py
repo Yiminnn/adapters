@@ -89,6 +89,18 @@ REQUIRES_NETWORK_AT_VERIFY = {
     ("go", "SSRFEcho"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
     ("go", "SSRFFiber"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
     ("go", "SSRFFastHTTP"): "functional tests fetch example.com; redirect test uses an aliyuncs.com redirector",
+    **{
+        ("java", cid): "tests fetch live sites (aliyun.com / alicdn.com / example.com) and an aliyuncs.com redirector"
+        for cid in (
+            "SSRFApacheHttpClient",
+            "SSRFCommonsIO",
+            "SSRFImageIO",
+            "SSRFJsoup",
+            "SSRFOkHttp",
+            "SSRFRestTemplate",
+            "SSRFURLConnection",
+        )
+    },
 }
 
 TEMPLATE_DIR = Path(__file__).parent / "task-template"

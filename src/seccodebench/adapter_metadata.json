@@ -13,13 +13,13 @@
           "None"
         ],
         "adaptable": true,
-        "notes": "98 cases (java 53, cpp 15, go 13, python 13, nodejs 4) x 4 scenarios (gen, gen-hints, fix, fix-hints). Upstream E2E mode drives IDE/CLI coding tools (e.g. Claude Code); exact supported agent versions not pinned upstream. 8 Java cases use an LLM-judge tester."
+        "notes": "98 cases (java 53, cpp 15, go 13, python 13, nodejs 4) x 4 scenarios (gen, gen-hints, fix, fix-hints). Upstream E2E mode drives CLI coding agents (claude-code, codex, gemini, ...). 8 Java cases use an LLM-judge tester."
       }
     ],
     "harbor_adapter": [
       {
         "split": "full",
-        "adapted_benchmark_size": 168,
+        "adapted_benchmark_size": 328,
         "parity_benchmark_size": 0,
         "parity_sampling_rate": 0.0,
         "registry_benchmark_size": 0,
@@ -33,7 +33,7 @@
           "None"
         ],
         "parity_costs": null,
-        "notes": "WORK IN PROGRESS: Python (12 cases), Node.js (4), C/C++ (14), Go (12) ported, x 4 scenarios = 168 tasks, oracle 168/168; Java (40 deterministic cases) in progress. Excluded as broken upstream (--include-broken): python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, 5 java XXEInJDK cases. 8 Java LLM-judge cases excluded (--include-llm-judge). No parity yet."
+        "notes": "82 cases x 4 scenarios. Excluded: 8 Java LLM-judge cases (--include-llm-judge) and 8 cases verifiably broken upstream (--include-broken): python/SQLInjectionSQLite3, cpp/BufferOverflowMemset, go/CommandInjectionExec, java XXEDocumentBuilder/XXESAXParser/XXESAXReader/XXETransformerFactory/XXEValidator. Hand-written oracles: 320/328 reward 1 in local Harbor runs; the remaining 8 (2 Java Mockito cases) fail only because of a local rootless-podman attach-socket issue and pass with tmpfs /tmp. No parity yet."
       }
     ]
   }

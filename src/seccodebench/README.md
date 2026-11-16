@@ -1,6 +1,6 @@
 # SecCodeBench → Harbor Adapter
 
-> **Status: work in progress.** Python (oracle 48/48), Node.js (16/16), C/C++ (56/56) and Go (48/48) are complete; Java is in progress. No parity has been run. See [Notes & Caveats](#notes--caveats).
+> **Status: all five languages ported; oracle verified on all 328 tasks.** Harbor runs pass 320/328. The 8 remaining are 2 Java Mockito cases blocked by a local-infrastructure issue; they pass in a tmpfs-`/tmp` container. No parity has been run. No parity has been run. See [Notes & Caveats](#notes--caveats).
 
 ## Overview
 
@@ -8,7 +8,7 @@ This adapter converts [SecCodeBench](https://github.com/alibaba/sec-code-bench) 
 
 - Upstream: `alibaba/sec-code-bench` pinned at commit `bf0c4d727098733af34c7add14a8d37ee84fd2a7` (Oct 12 2026, the last commit before the repo was marked as moved).
 - Upstream size: 98 cases × 4 scenarios = 392 (case, scenario) pairs. By language: Java 53, C/C++ 15, Go 13, Python 13, Node.js 4.
-- Ported so far: Python (12 cases after exclusions), Node.js (4), C/C++ (14) and Go (12), × 4 scenarios = **168 tasks**. Java (40 cases after exclusions, 160 tasks) is in progress. Full scope: 82 cases, **328 tasks**.
+- This adapter: 82 cases (Python 12, Node.js 4, C/C++ 14, Go 12, Java 40) × 4 scenarios = **328 tasks**. Excluded: 8 Java LLM-judge cases and 8 cases that are verifiably broken upstream; see Notes & Caveats.
 - Task names: `alibaba/seccodebench__<language>-<case-slug>-<scenario>`, for example `alibaba/seccodebench__python-sstijinja2template-gen`.
 
 ## What is SecCodeBench?
@@ -107,7 +107,7 @@ The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are d
 
 **Fixed upstream E2E inconsistency (3 Python SQL cases).** For SQLInjectionPsycopg2, SQLInjectionPyMySQL and SQLInjectionSQLite3, the upstream `params` (which E2E uses to tell the agent which file to write) point at the `db.py` helper. The scenario prompt itself shows `db.py` as context and asks for `src/<module>/<module>.py`. The upstream Python verifier ignores the submitted path and always tests the code as `src/<module>/<module>.py` (from `signature.json`). Upstream E2E therefore tells the agent to write the wrong file. The adapter uses the verifier's path (`src/<module>/<module>.py`) in both the instruction and the verifier, which matches the prompt body and upstream chat mode. Parity requires the same change on the original side: see `parity/original_side_patches.md` (P1).
 
-**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case). Node.js: 4/4. C/C++: 15/15 written; the excluded Memset oracle is kept for `--include-broken`. Go: 13/13 written, including the excluded CommandInjectionExec.
+**Oracles.** Upstream ships only the vulnerable templates; there are no reference secure solutions. All oracles are hand-written (`src/seccodebench/oracles/<language>/<Case>.<ext>`), and the same oracle file serves all 4 scenarios of a case. Python: 13/13 cases (12 generated, plus the excluded SQLite3 case). Node.js: 4/4. C/C++: 15/15 written; the excluded Memset oracle is kept for `--include-broken`. Go: 13/13 written, including the excluded CommandInjectionExec. Java: 45/45 deterministic cases written, including the 5 excluded XXEInJDK cases. The C/C++, Go and Java oracles were drafted by parallel helper agents and checked in isolated container harnesses (`runs-seccodebench/{ctest,gotest,javatest}_local.sh`), then by Harbor runs.
 
 **Negative control.** `--solution-mode vulnerable` ships, as the "solution", the vulnerable code that the upstream `fix` prompt shows the agent (its `## Code` block). For Python this equals the verifier repo's source file up to translated comments. For Node.js the verifier repo's `src/` holds a different, hardened implementation, so the prompt is the right source.
 
@@ -123,6 +123,8 @@ The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are d
 | `scb-oracle-cpp56` | 14 C/C++ cases × 4 scenarios | **56/56 reward 1.0**, 0 errors |
 | `scb-oracle-go48` | 12 Go cases × 4 scenarios | **48/48 reward 1.0**, 0 errors |
 | `scb-negctrl-go13-v2` | vulnerable code, 13 Go cases × `gen` | 12/13 reward 0; only the excluded CommandInjectionExec scores 1. In 9 of the 12, functional passes and security fails. |
+| `scb-oracle-java160` | 40 Java cases × 4 scenarios | 152/160 reward 1.0, 0 errors. The 8 non-passing are JDBCInjection and SQLInjectionMyBatisOrderBy × 4, all failing with Mockito's "Could not self-attach to current VM" (local-infrastructure caveat). Both reach reward 1 with `/tmp` on tmpfs. |
+| `scb-negctrl-java40` | vulnerable code, 40 Java cases × `gen` | 40/40 reward 0. In 37 of them, functional passes and security fails. |
 | `scb-negctrl-cpp15` | vulnerable code, 15 C/C++ cases × `gen` | 15/15 reward 0. 14 of them already fail the functional suite: it is built with ASan/UBSan, so memory errors abort it. Only BufferOverflowStrcpy is "functional but insecure". |
 
 **How to read the negative control.** For C/C++, 14 of the 15 vulnerable versions already fail the *functional* suite, because the suites are built with ASan/UBSan and the memory error aborts the run. So the C/C++ negative control shows that the vulnerable code scores 0, but in those cases it does not isolate the security check. Python and Node.js vulnerable code mostly passes functional and fails security.
