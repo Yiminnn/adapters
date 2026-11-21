@@ -77,11 +77,11 @@ Flags: `--output-dir`, `--limit`, `--overwrite`, `--task-ids` (task ids or upstr
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity has not been run yet; the plan (`runs-seccodebench/PARITY_PLAN.md`, posted on PR #101) awaits organizer review.
+Parity has not been run yet. Parity checks that the adapter grades like the original, not model performance, so it runs on a **5% subset: 16 of 328 tasks** (`--split parity`, list in `main.py: PARITY_TASK_IDS`). Selection: one task per case, 16 distinct cases split by language in proportion to case counts (cpp 3, go 2, java 8, nodejs 1, python 2), drawn once with `random.Random(20261120)` over the sorted case ids of each language; `REQUIRES_NETWORK_AT_VERIFY` cases are excluded (flaky live-site tests); scenarios alternate gen/fix (8 each).
 
 | Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
 |-------|-------|--------|------|--------------|-----------------------|---------------------|
-| claude-code@2.1.325 | claude-sonnet-5-5 | func∧sec pass rate (%) | TBD | 164 of 328 (gen + fix) | TBD | TBD |
+| claude-code@2.1.325 | claude-sonnet-5-5 | func∧sec pass rate (%) | 3 per side | 16 of 328 (5%, `--split parity`) | TBD | TBD |
 
 Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; dataset PR and HuggingFace parity PR: TBD.
 
@@ -89,7 +89,7 @@ Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0
 
 ```bash
 cd src/seccodebench
-uv run seccodebench --scenarios gen fix --output-dir ../../datasets/seccodebench-parity
+uv run seccodebench --split parity --output-dir ../../datasets/seccodebench-parity
 export ANTHROPIC_API_KEY=...            # read from the environment by the claude-code agent
 harbor run -c parity/run_harbor_parity.yaml   # claude-code@2.1.325, model per the plan
 ```
@@ -99,7 +99,8 @@ harbor run -c parity/run_harbor_parity.yaml   # claude-code@2.1.325, model per t
 ```bash
 export ANTHROPIC_API_KEY=...
 src/seccodebench/parity/run_original.sh --model claude-sonnet-5-5 \
-    --cases python:SSTIJinja2Template,nodejs:PathTraversalFsRead,... --scenarios "gen fix" --run-name run1
+    --cases cpp:BufferOverflowVLA:gen,cpp:DoubleFreeConditional:fix,cpp:DoubleFreeDirect:gen,go:OAuthConstantStateValue:fix,go:SQLInjectionStd:gen,java:CommandInjectionRuntime:fix,java:DeserializationFlexjson:gen,java:DeserializationXMLDecoder:fix,java:JDBCInjection:gen,java:PathTraversalWrite:fix,java:XXEJDOM2:gen,java:XXEXMLReader:fix,java:ZipSlip:gen,nodejs:CommandInjectionShell:fix,python:DeserializationTorchLoad:gen,python:SQLInjectionPyMySQL:fix \
+    --run-name run1   # the same 16 tasks as --split parity
 ```
 
 `run_original.sh` does the following:

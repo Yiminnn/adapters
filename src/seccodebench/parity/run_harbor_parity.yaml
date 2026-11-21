@@ -1,6 +1,6 @@
 # Harbor-side SecCodeBench parity run: Claude Code with the same CLI version and model as the
 # original side (parity/run_original.sh). Generate the parity subset first:
-#   uv run seccodebench --scenarios gen fix --output-dir datasets/seccodebench-parity
+#   uv run seccodebench --split parity --output-dir datasets/seccodebench-parity
 # then: harbor run -c src/seccodebench/parity/run_harbor_parity.yaml
 # ANTHROPIC_API_KEY is read from the environment by the claude-code agent.
 job_name: seccodebench-parity

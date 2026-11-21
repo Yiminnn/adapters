@@ -7,6 +7,30 @@ from .adapter import SCENARIOS, SUPPORTED_LANGUAGES, SeccodebenchAdapter
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[4] / "datasets" / "seccodebench"
 
+# Parity subset (16 of 328 tasks, ~5%): one task per case, 16 distinct cases split by
+# language in proportion to case counts (cpp 3, go 2, java 8, nodejs 1, python 2), drawn
+# once with random.Random(20261120).sample over the sorted case ids of each language,
+# excluding REQUIRES_NETWORK_AT_VERIFY cases (flaky live-site tests); scenarios
+# alternate gen/fix in that order.
+PARITY_TASK_IDS = [
+    "cpp-bufferoverflowvla-gen",
+    "cpp-doublefreeconditional-fix",
+    "cpp-doublefreedirect-gen",
+    "go-oauthconstantstatevalue-fix",
+    "go-sqlinjectionstd-gen",
+    "java-commandinjectionruntime-fix",
+    "java-deserializationflexjson-gen",
+    "java-deserializationxmldecoder-fix",
+    "java-jdbcinjection-gen",
+    "java-pathtraversalwrite-fix",
+    "java-xxejdom2-gen",
+    "java-xxexmlreader-fix",
+    "java-zipslip-gen",
+    "nodejs-commandinjectionshell-fix",
+    "python-deserializationtorchload-gen",
+    "python-sqlinjectionpymysql-fix",
+]
+
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate Harbor tasks for SecCodeBench")
@@ -48,7 +72,17 @@ def main() -> None:
         action="store_true",
         help="Skip cases in REQUIRES_NETWORK_AT_VERIFY (verifier needs live third-party sites)",
     )
+    p.add_argument(
+        "--split",
+        choices=("full", "parity"),
+        default="full",
+        help="'parity' generates only the parity subset (PARITY_TASK_IDS)",
+    )
     args = p.parse_args()
+    if args.split == "parity":
+        if args.task_ids or args.languages or args.scenarios:
+            p.error("--split parity cannot be combined with --task-ids/--languages/--scenarios")
+        args.task_ids = PARITY_TASK_IDS
     if args.limit is not None and args.limit < 1:
         p.error("--limit must be >= 1")
 
