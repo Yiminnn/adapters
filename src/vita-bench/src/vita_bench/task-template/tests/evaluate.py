@@ -2,8 +2,9 @@
 """
 VitaBench verifier.
 
-Fetches the conversation recorded by the `vita-runtime` sidecar (GET /state),
-rebuilds the official
+Runs in a separate verifier container. Reads the conversation recorded by the
+`vita-runtime` sidecar (collected by Harbor as a sidecar artifact after the agent
+container is stopped, so the agent cannot alter it), rebuilds the official
 `vita.data_model.simulation.SimulationRun`, and scores it with the official
 `vita.evaluator.evaluate_simulation` (rubric-based sliding-window LLM
 evaluator). The binary reward (1.0 only if every rubric is met) is written to
@@ -132,20 +133,16 @@ def _evaluate(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _load_state(runtime_url: str) -> tuple[dict[str, Any] | None, str]:
-    """Fetch the conversation from the sidecar.
+def _load_state(state_path: Path) -> dict[str, Any]:
+    """Read the conversation the sidecar wrote to its own filesystem.
 
-    The sidecar is the only trusted source: files under /logs/agent live in the
-    agent's container and could be written by the agent, so they are never read.
+    Harbor copies it from the `vita-runtime` service (never from the agent's
+    container) into this verifier at the same path. The sidecar writes it at
+    startup, so a missing file is an infrastructure failure.
     """
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(f"{runtime_url}/state", timeout=60) as response:
-            return json.loads(response.read().decode("utf-8")), f"{runtime_url}/state"
-    except Exception as exc:  # noqa: BLE001
-        print(f"Could not fetch state from {runtime_url}: {exc}", file=sys.stderr)
-        return None, ""
+    if not state_path.is_file():
+        raise RuntimeError(f"vita-runtime state artifact missing at {state_path}")
+    return json.loads(state_path.read_text(encoding="utf-8"))
 
 
 def main() -> None:
@@ -153,8 +150,9 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--runtime-log", type=Path, default=None, help="Ignored (kept for compatibility).")
     parser.add_argument(
-        "--runtime-url",
-        default=os.environ.get("VITA_RUNTIME_URL", "http://vita-runtime:8000"),
+        "--state",
+        type=Path,
+        default=Path(os.environ.get("VITA_RUNTIME_STATE_PATH", "/var/lib/vita/state.json")),
     )
     parser.add_argument("--reward", type=Path, required=True)
     parser.add_argument("--result", type=Path, required=True)
@@ -163,23 +161,20 @@ def main() -> None:
     config = json.loads(args.config.read_text(encoding="utf-8"))
 
     try:
-        state, source = _load_state(args.runtime_url)
-        if state is None:
-            # Infrastructure failure, not an agent failure: error the trial.
-            raise RuntimeError(f"vita-runtime sidecar unreachable at {args.runtime_url}")
-        else:
-            # Keep a copy with the verifier outputs (Harbor collects this dir).
-            saved = args.result.parent / "vita_runtime_state.json"
-            saved.parent.mkdir(parents=True, exist_ok=True)
-            saved.write_text(
-                json.dumps(state, indent=2, ensure_ascii=False, default=str),
-                encoding="utf-8",
-            )
-            if state.get("infra_error"):
-                # The user simulator's LLM call failed: an infrastructure error, not an agent failure.
-                raise RuntimeError(f"vita-runtime reported an infrastructure error: {state['infra_error']}")
-            result = _evaluate(config, state)
-            result["state_source"] = source
+        state = _load_state(args.state)
+        source = str(args.state)
+        # Keep a copy with the verifier outputs (Harbor collects this dir).
+        saved = args.result.parent / "vita_runtime_state.json"
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        saved.write_text(
+            json.dumps(state, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        if state.get("infra_error"):
+            # The user simulator's LLM call failed: an infrastructure error, not an agent failure.
+            raise RuntimeError(f"vita-runtime reported an infrastructure error: {state['infra_error']}")
+        result = _evaluate(config, state)
+        result["state_source"] = source
     except Exception as exc:  # noqa: BLE001
         # Infrastructure failure (e.g. evaluator LLM unreachable; upstream
         # `generate` swallows HTTP errors and returns None). Do not write a

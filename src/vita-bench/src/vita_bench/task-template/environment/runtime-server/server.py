@@ -8,8 +8,10 @@ through an MCP streamable-http server, mirroring the original
     agent -> (tool call) -> environment -> agent
     agent -> (message)   -> user        -> agent
 
-The full conversation is persisted to /logs/agent/vita_runtime_state.json after
-every step so the verifier can replay it through the official evaluator.
+The full conversation is persisted to /var/lib/vita/state.json (in this sidecar's
+own filesystem) after every step. Harbor collects that file as a sidecar artifact
+after stopping the agent container and hands it to the separate verifier, which
+replays it through the official evaluator.
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ from vita.utils.utils import format_time, get_now  # noqa: E402
 
 TASK_CONFIG_PATH = Path("/app/task_config.json")
 STATE_LOG_PATH = Path(
-    os.environ.get("VITA_RUNTIME_STATE_PATH", "/logs/agent/vita_runtime_state.json")
+    os.environ.get("VITA_RUNTIME_STATE_PATH", "/var/lib/vita/state.json")
 )
 STOP_TOKEN = "###STOP###"
 # Only failure reasons may be recorded via record_termination; success endings

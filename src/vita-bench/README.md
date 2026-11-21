@@ -52,6 +52,9 @@ reports success rate (average reward) per task set.
   (tools + database) and the original `UserSimulator`; the 66/20/24/38 domain
   tools are exposed 1:1 as MCP tools alongside `start_conversation`,
   `send_message_to_user`, `end_conversation`, etc.
+- Grading runs in a **separate verifier** (`environment_mode = "separate"`,
+  image built from `tests/Dockerfile`). The conversation reaches it as a
+  sidecar artifact, so the agent's container never touches what is graded.
 - The verifier rebuilds the official `SimulationRun` from the recorded
   conversation and calls `vita.evaluator.evaluate_simulation` (evaluation type
   `trajectory`, the upstream default) with a configurable evaluator model.
@@ -69,7 +72,7 @@ datasets/vita-bench/
 │   ├── task.toml
 │   ├── instruction.md               # upstream agent system prompt + MCP usage notes
 │   ├── environment/
-│   │   ├── Dockerfile               # python:3.12 + pinned vita package (agent + verifier)
+│   │   ├── Dockerfile               # python:3.12 + pinned vita package (agent)
 │   │   ├── docker-compose.yaml      # adds the vita-runtime sidecar
 │   │   └── runtime-server/
 │   │       ├── Dockerfile
@@ -80,6 +83,7 @@ datasets/vita-bench/
 │   │   ├── solve.sh                 # replays oracle_trajectory.json
 │   │   └── oracle_trajectory.json   # present once the oracle has been built
 │   └── tests/
+│       ├── Dockerfile               # separate verifier image (pinned vita package + tests/)
 │       ├── config.json              # full task incl. evaluation_criteria
 │       ├── evaluate.py              # official evaluator wrapper
 │       ├── vita_models_config.py
@@ -180,9 +184,13 @@ pinned commit is cloned into `.cache/vitabench`.
 ## How It Is Graded
 
 The sidecar records every message (assistant text, tool calls, tool results,
-user messages). The verifier fetches the conversation from the sidecar
-(`GET http://vita-runtime:8000/state`; it never reads files under `/logs/agent`,
-which the agent could write), parses it into upstream `AssistantMessage`/`UserMessage`/`ToolMessage` objects, builds a
+user messages) in its own filesystem (`/var/lib/vita/state.json`). The task
+declares that file as a sidecar artifact (`service = "vita-runtime"`), so after
+the agent phase Harbor stops the agent container, copies the file out of the
+sidecar, and restores it at the same path in the separate verifier container
+(built from `tests/Dockerfile`; the agent never sees it or the rubrics in
+`tests/config.json`). The verifier never reads anything from the agent's
+container. It parses the conversation into upstream `AssistantMessage`/`UserMessage`/`ToolMessage` objects, builds a
 `SimulationRun`, and calls `evaluate_simulation(evaluation_type="trajectory")`:
 rubrics from `expected_states[*].state_rubrics` and `overall_rubrics` are judged
 over sliding windows of 10 messages (overlap 2) by the evaluator LLM; reward is

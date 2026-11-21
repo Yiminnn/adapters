@@ -1,7 +1,8 @@
 FROM python:3.12-slim-bookworm
 
-# Main (agent) container. It also hosts the verifier, which needs the official
-# VitaBench package to run the rubric evaluator, so install VitaBench here too.
+# Main (agent) container. VitaBench is installed for agents that reuse its code
+# (e.g. vita-llm-agent, the parity agent). Grading runs in a separate verifier
+# image (tests/Dockerfile).
 
 ARG VITABENCH_REPO="https://github.com/meituan-longcat/vitabench.git"
 ARG VITABENCH_COMMIT="742e240855bf8686a0842360749d5ea970ea3987"
@@ -12,8 +13,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# The agent shares this container, so the task definitions (hidden user goals and grading
-# rubrics) are deleted after install; the verifier gets its task via /tests/config.json.
+# The task definitions (hidden user goals and grading rubrics) are deleted after install;
+# only the separate verifier gets its task, via /tests/config.json.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && git clone "${VITABENCH_REPO}" "${VITABENCH_ROOT}" \
     && git -C "${VITABENCH_ROOT}" checkout "${VITABENCH_COMMIT}" \
