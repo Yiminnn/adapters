@@ -21,6 +21,7 @@ import inspect
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -62,6 +63,17 @@ RECORDABLE_TERMINATIONS = {"max_steps", "too_many_errors", "invalid_agent_messag
 
 mcp = FastMCP("vita-runtime")
 
+# VitaBench keeps its data registries (locations, stores, products, ...) per thread
+# (vita.data_model.thread_safe_base), and upstream `vita run` builds and uses an
+# environment on one thread. FastMCP runs sync tools in a worker pool, so a tool call
+# on another thread sees empty registries ("list index out of range", products "not
+# found"). Build the runtime on one dedicated thread and run every call there.
+_VITA_THREAD = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vita")
+
+
+def on_vita_thread(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    return _VITA_THREAD.submit(fn, *args, **kwargs).result()
+
 
 def make_domain_tool_handler(
     tool: Any, call_assistant_tool: Callable[[str, dict[str, Any]], str]
@@ -78,7 +90,7 @@ def make_domain_tool_handler(
         annotations[param_name] = annotation
 
     def _tool_handler(**kwargs: Any) -> str:
-        return call_assistant_tool(tool_name, kwargs)
+        return on_vita_thread(call_assistant_tool, tool_name, kwargs)
 
     _tool_handler.__name__ = tool_name
     _tool_handler.__qualname__ = tool_name
@@ -498,7 +510,7 @@ class VitaRuntime:
         return self.get_runtime_status()
 
 
-runtime = VitaRuntime(TASK_CONFIG_PATH)
+runtime = on_vita_thread(VitaRuntime, TASK_CONFIG_PATH)
 
 
 @mcp.tool()
@@ -506,55 +518,55 @@ def configure_run(
     seed: int | None = None, max_steps: int | None = None, max_errors: int | None = None
 ) -> str:
     """Configure run parameters (seed, step/error limits) before start_conversation."""
-    return runtime.configure_run(seed=seed, max_steps=max_steps, max_errors=max_errors)
+    return on_vita_thread(runtime.configure_run, seed=seed, max_steps=max_steps, max_errors=max_errors)
 
 
 @mcp.tool()
 def get_runtime_status() -> str:
     """Return step count, error count, limits, seed and termination status."""
-    return runtime.get_runtime_status()
+    return on_vita_thread(runtime.get_runtime_status)
 
 
 @mcp.tool()
 def get_assistant_tool_schemas() -> str:
     """Return the original VitaBench OpenAI-style JSON schemas of the platform tools."""
-    return runtime.get_assistant_tool_schemas()
+    return on_vita_thread(runtime.get_assistant_tool_schemas)
 
 
 @mcp.tool()
 def start_conversation() -> str:
     """Start the conversation and return the user's first message."""
-    return runtime.start_conversation()
+    return on_vita_thread(runtime.start_conversation)
 
 
 @mcp.tool()
 def submit_assistant_message(message: str) -> str:
     """Record an assistant message, advance the user simulator, return JSON status."""
-    return runtime.submit_assistant_message(message)
+    return on_vita_thread(runtime.submit_assistant_message, message)
 
 
 @mcp.tool()
 def submit_assistant_tool_calls(tool_calls_json: str, content: str | None = None) -> str:
     """Record one assistant tool-call message (JSON list of {id,name,arguments}) and execute it."""
-    return runtime.submit_assistant_tool_calls(tool_calls_json, content)
+    return on_vita_thread(runtime.submit_assistant_tool_calls, tool_calls_json, content)
 
 
 @mcp.tool()
 def send_message_to_user(message: str) -> str:
     """Send a message to the user and return the user's reply."""
-    return runtime.send_message_to_user(message)
+    return on_vita_thread(runtime.send_message_to_user, message)
 
 
 @mcp.tool()
 def end_conversation(message: str = STOP_TOKEN) -> str:
     """End the conversation once the user has confirmed there is nothing else."""
-    return runtime.end_conversation(message)
+    return on_vita_thread(runtime.end_conversation, message)
 
 
 @mcp.tool()
 def record_termination(reason: str) -> str:
     """Record a non-success termination reason (max_steps, too_many_errors, ...)."""
-    return runtime.record_termination(reason)
+    return on_vita_thread(runtime.record_termination, reason)
 
 
 @mcp.custom_route("/state", methods=["GET"])
@@ -562,7 +574,7 @@ async def http_get_state(request: Any) -> Any:
     """Export the recorded conversation (used by the verifier)."""
     from starlette.responses import JSONResponse
 
-    return JSONResponse(json.loads(json.dumps(runtime.state_payload(), default=str)))
+    return JSONResponse(json.loads(json.dumps(on_vita_thread(runtime.state_payload), default=str)))
 
 
 @mcp.custom_route("/state", methods=["POST"])
@@ -575,7 +587,7 @@ async def http_post_state(request: Any) -> Any:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     try:
         oracle = await request.json()
-        payload = runtime.load_oracle_state(oracle)
+        payload = on_vita_thread(runtime.load_oracle_state, oracle)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=400)
     return JSONResponse(
