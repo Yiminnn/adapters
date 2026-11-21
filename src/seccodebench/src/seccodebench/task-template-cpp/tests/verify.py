@@ -1,4 +1,5 @@
-"""SecCodeBench C/C++ verifier, run inside the task container.
+"""SecCodeBench C/C++ verifier, run in a separate verifier container (same image as the task;
+Harbor restores the agent's target file at /app/<target> as an artifact).
 
 Port of the upstream c-verifier (docker/model/cpp/code_security_verifier/runner.py:
 CTestCaseRunner) and sec_code_bench/tester/remote_verifier.py: copy the case, drop in the

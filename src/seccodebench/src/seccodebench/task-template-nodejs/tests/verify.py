@@ -1,4 +1,5 @@
-"""SecCodeBench Node.js verifier, run inside the task container.
+"""SecCodeBench Node.js verifier, run in a separate verifier container (same image as the task;
+Harbor restores the agent's target file at /app/<target> as an artifact).
 
 Port of the upstream nodejs-verifier (docker/model/nodejs/code_security_verifier/runner.py)
 and sec_code_bench/tester/remote_verifier.py: copy the case next to the shared

@@ -1,4 +1,5 @@
-"""SecCodeBench Go verifier, run inside the task container.
+"""SecCodeBench Go verifier, run in a separate verifier container (same image as the task;
+Harbor restores the agent's target file at /app/<target> as an artifact).
 
 Port of the upstream go-verifier (docker/model/go/code_security_verifier/runner.py:
 run_go_test + parse_golang_test_result.py) and sec_code_bench/tester/remote_verifier.py:

@@ -1,4 +1,5 @@
-"""SecCodeBench verifier, run inside the task container.
+"""SecCodeBench verifier, run in a separate verifier container (same image as the task;
+Harbor restores the agent's target file at /app/<target> as an artifact).
 
 Port of the upstream python-verifier service
 (docker/model/python/verify/core/evaluator.py and sec_code_bench/tester/remote_verifier.py):

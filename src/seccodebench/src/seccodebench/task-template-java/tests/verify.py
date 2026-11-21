@@ -1,4 +1,6 @@
-"""SecCodeBench Java verifier, run inside the task container (deterministic UnitTester cases).
+"""SecCodeBench Java verifier (deterministic UnitTester cases), run in a separate verifier
+container (same image as the task; Harbor restores the agent's target file at /app/<target>
+as an artifact).
 
 Port of the upstream java-verifier (docker/model/java/verify_xml.py +
 verifier/evaluator/language_handler/java.py: run_fun_unit_test / run_sec_unit_test /
