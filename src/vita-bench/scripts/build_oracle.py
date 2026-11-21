@@ -13,15 +13,24 @@ verifier reward is 1.0, and copies the runtime state file
 (`verifier/vita_runtime_state.json`, saved by the verifier) to `src/vita-bench/oracle/<task_set>/<id>.json`
 so the adapter can ship it as `solution/oracle_trajectory.json`.
 
-Usage (from the adapters repo root):
-
-    python src/vita-bench/scripts/build_oracle.py jobs/<job-id> [jobs/<job-id> ...]
-    python src/vita-bench/scripts/build_oracle.py jobs/<job-id> --min-passes 2
-
 A trajectory is only accepted when it has been scored 1.0 at least
-`--min-passes` times across the scanned trials (re-run the verifier with
-`harbor run ... -a oracle` on the generated dataset to add confirmations), which
-guards against single lucky judgments from the stochastic evaluator.
+`--min-passes` times across the scanned trials, which guards against single
+lucky judgments from the stochastic evaluator. Independent live runs never
+confirm each other (each conversation is different), so oracles are built in
+two rounds (from the adapters repo root):
+
+    # 1. harvest one passing candidate per task into a staging dir (not oracle/)
+    python src/vita-bench/scripts/build_oracle.py jobs/<live-job> --min-passes 1 \
+        --out jobs/oracle-candidates --clean
+    # 2. generate tasks with the candidates and replay them: `-a oracle` re-scores each
+    #    stored conversation once more (see README "Oracle solutions")
+    # 3. keep only trajectories scored 1.0 twice (live + replay) in a clean oracle/
+    python src/vita-bench/scripts/build_oracle.py jobs/<live-job> jobs/<replay-job> \
+        --min-passes 2 --clean
+
+`--clean` empties the output dir's trajectory files first, so candidates that
+failed the replay never linger there (`--overwrite` alone only replaces files of
+accepted tasks).
 """
 
 from __future__ import annotations
@@ -57,9 +66,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("job_dirs", nargs="+", type=Path)
     parser.add_argument("--min-passes", type=int, default=1)
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--out", type=Path, default=ORACLE_DIR, help="output dir (default: oracle/)")
+    parser.add_argument("--overwrite", action="store_true", help="replace files of accepted tasks")
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="delete existing trajectory files in --out first, so it holds only this run's accepted set",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    out_dir: Path = args.out
 
     # (task_set, task_id) -> list of (passes, state_path)
     candidates: dict[tuple[str, str], list[tuple[int, Path]]] = defaultdict(list)
@@ -81,6 +97,12 @@ def main() -> None:
             pass_counts[key] += 1
             candidates[identity].append((pass_counts[key], state_path))
 
+    if args.clean and not args.dry_run and out_dir.is_dir():
+        stale = sorted(out_dir.glob("*/*.json"))
+        for path in stale:
+            path.unlink()
+        print(f"Removed {len(stale)} existing trajectories from {out_dir}")
+
     written = 0
     skipped: list[str] = []
     for (task_set, task_id), entries in sorted(candidates.items()):
@@ -88,7 +110,7 @@ def main() -> None:
         if best[0] < args.min_passes:
             skipped.append(f"{task_set}/{task_id} (best {best[0]} pass(es))")
             continue
-        target = ORACLE_DIR / task_set / f"{task_id}.json"
+        target = out_dir / task_set / f"{task_id}.json"
         if target.exists() and not args.overwrite:
             continue
         print(f"{task_set}/{task_id}: {best[0]} pass(es) <- {best[1]}")
@@ -97,7 +119,7 @@ def main() -> None:
             shutil.copy2(best[1], target)
         written += 1
 
-    print(f"\nWrote {written} oracle trajectories to {ORACLE_DIR}")
+    print(f"\nWrote {written} oracle trajectories to {out_dir}")
     if skipped:
         print(f"Skipped {len(skipped)} tasks below --min-passes={args.min_passes}:")
         for item in skipped:

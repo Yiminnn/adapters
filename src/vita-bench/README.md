@@ -203,16 +203,33 @@ instead of recording a false 0.
 ## Oracle solutions
 
 VitaBench has no reference solutions. Following the adapter spec for such
-benchmarks, oracle trajectories are produced by running agents over the tasks,
-keeping conversations scored 1.0 (confirmed by re-scoring), and completing the
-rest with stronger models plus human review:
+benchmarks, oracle trajectories are produced by running agents over the tasks
+and keeping conversations scored 1.0 **twice**: once live, and once more when
+the stored conversation is replayed and re-scored. Independent live runs never
+confirm each other (every conversation differs), so this takes two rounds, with
+candidates kept in a staging dir until they are confirmed. Tasks that never get
+a confirmed trajectory are completed with stronger models plus human review.
+From the adapters repo root:
 
 ```bash
+# 1. Live agent runs
 PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench.yaml
-python src/vita-bench/scripts/build_oracle.py jobs/<job-id> --min-passes 2
-uv run vita-bench --output-dir datasets/vita-bench --overwrite   # re-generate with oracle files
+# 2. Stage one passing candidate per task (outside oracle/)
+python src/vita-bench/scripts/build_oracle.py jobs/<live-job> --min-passes 1 --out jobs/oracle-candidates --clean
+# 3. Generate tasks with the candidates and replay them through the verifier
+uv run --project src/vita-bench vita-bench --oracle-dir jobs/oracle-candidates \
+    --output-dir datasets/vita-bench-candidates --overwrite
+uv run --project src/vita-bench harbor run -p datasets/vita-bench-candidates -a oracle --job-name <replay-job>
+# 4. Promote only trajectories that passed live and on replay into a clean oracle/
+python src/vita-bench/scripts/build_oracle.py jobs/<live-job> jobs/<replay-job> --min-passes 2 --clean
+# 5. Re-generate the dataset with the confirmed oracle files and check it
+uv run --project src/vita-bench vita-bench --output-dir datasets/vita-bench --overwrite
 uv run --project src/vita-bench harbor run -p datasets/vita-bench -a oracle
 ```
+
+`--clean` empties the output dir before writing, so a candidate that failed its
+replay never stays in `oracle/` (`--overwrite` only replaces files of accepted
+tasks). The script's self-check is `python3 -I src/vita-bench/scripts/test_build_oracle.py`.
 
 `solution/solve.sh` loads the stored trajectory into the sidecar through
 `POST /state`. That endpoint requires a per-task random token that only the

@@ -66,6 +66,13 @@ def main() -> None:
         help="Only generate these task IDs",
     )
     parser.add_argument(
+        "--oracle-dir",
+        type=Path,
+        default=None,
+        help="Read oracle trajectories from this dir instead of src/vita-bench/oracle "
+        "(e.g. staged candidates from scripts/build_oracle.py --out)",
+    )
+    parser.add_argument(
         "--split",
         choices=("full", "parity"),
         default="full",
@@ -82,6 +89,7 @@ def main() -> None:
         overwrite=args.overwrite,
         limit=args.limit,
         task_ids=args.task_ids,
+        oracle_dir=args.oracle_dir,
     )
 
     adapter.run()

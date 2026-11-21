@@ -72,6 +72,9 @@ class VitaBenchAdapter:
         self.language = str(kwargs.get("language") or self._DEFAULT_LANGUAGE)
         self.task_sets = self._parse_task_sets(kwargs.get("task_sets"))
         self.vitabench_root = self._resolve_vitabench_root(kwargs.get("vitabench_root"))
+        # Staged candidates (scripts/build_oracle.py --out) can be replayed before promotion.
+        oracle_dir = kwargs.get("oracle_dir")
+        self.oracle_dir = Path(oracle_dir) if oracle_dir else self._ORACLE_DIR
 
     # ------------------------------------------------------------------ setup
     def _parse_task_sets(self, raw: Any) -> list[str]:
@@ -293,7 +296,7 @@ class VitaBenchAdapter:
     ) -> None:
         solution_dir = task_dir / "solution"
         (solution_dir / "oracle_token").write_text(oracle_token, encoding="utf-8")
-        oracle_path = self._ORACLE_DIR / vita_task.task_set / f"{vita_task.source_id}.json"
+        oracle_path = self.oracle_dir / vita_task.task_set / f"{vita_task.source_id}.json"
         if oracle_path.exists():
             shutil.copy2(oracle_path, solution_dir / "oracle_trajectory.json")
         (solution_dir / "solve.sh").chmod(0o755)
