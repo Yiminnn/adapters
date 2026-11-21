@@ -250,11 +250,12 @@ NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cros
 #   ota:          70807003 70807006 70807007 70812008 d0807003
 #   cross_domain: 10807014 10808007 10811010 10811015 a0805002
 
-# Harbor side (generate the subset with: uv run vita-bench --split parity --output-dir datasets/vita-bench-parity)
-PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench.yaml
+# Harbor side: generate the 20-task subset, then run the parity config (it points at datasets/vita-bench-parity)
+uv run --project src/vita-bench vita-bench --split parity --output-dir datasets/vita-bench-parity
+PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench_parity.yaml
 
 # Per-run success rate, mean ± sample SEM, the spec's run-range overlap check, and the metrics JSON
-python3 src/vita-bench/parity/aggregate.py --original parity/original/<save_to> --harbor jobs/<job-id>
+python3 src/vita-bench/parity/aggregate.py --original parity/original/<save_to> --harbor jobs/vita-bench-parity/<job-id>
 ```
 
 Both harnesses were smoke-tested end to end on 2 delivery tasks with
