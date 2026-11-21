@@ -224,24 +224,33 @@ Notes & Caveats).
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity has not been run yet. Planned setting (to be confirmed with the Harbor
-team): `vita-llm-agent` with the same model on both sides, user simulator
-`gpt-4.1` (upstream default), identical evaluator model, 3 trials, all 400 tasks,
-metric = average reward (success rate) per task set and overall, reported as
+Parity has not been run yet. Parity checks that the adapter grades like the
+original, not model performance, so it runs on a **5% subset: 20 of 400 tasks**
+(`--split parity`, list in `main.py: PARITY_TASK_IDS`): 5 tasks per domain
+(delivery, instore, ota, cross_domain), drawn once with `random.Random(20261120)`
+over the sorted task ids of each domain. Planned setting (to be confirmed with
+the Harbor team): `vita-llm-agent` with the same model on both sides, user
+simulator `gpt-4.1` (upstream default), identical evaluator model, 3 runs per
+side, metric = average reward (success rate) per task set and overall, reported as
 mean ± sample SEM over trials.
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 |-------|-------|--------|----------------|--------------|--------------------------------|----------------------------|
-| vita-llm-agent@1.0 | TBD | Average Reward | 3 | 400 tasks | TBD | TBD |
+| vita-llm-agent@1.0 | TBD | Average Reward | 3 per side | 20 of 400 (5%, `--split parity`) | TBD | TBD |
 
 Reproduction:
 
 ```bash
 # Original side: upstream `vita run` (pinned commit) in a container, with the same models.yaml generator
 OPENAI_API_KEY=... OPENAI_BASE_URL=... AGENT_MODEL=gpt-4.1 USER_MODEL=gpt-4.1 EVALUATOR_MODEL=<judge> \
-NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cross-10804001 cross_domain parity/original
+NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cross-10804001 <task_set> parity/original <ids...>
+# Parity subset (= --split parity), one call per task set:
+#   delivery:     80715001 90721002 d0716001 e0716001 e0721004
+#   instore:      10826018 10826030 10826073 10826302 10826306
+#   ota:          70807003 70807006 70807007 70812008 d0807003
+#   cross_domain: 10807014 10808007 10811010 10811015 a0805002
 
-# Harbor side
+# Harbor side (generate the subset with: uv run vita-bench --split parity --output-dir datasets/vita-bench-parity)
 PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench.yaml
 
 # Per-run success rate, mean ± sample SEM, the spec's run-range overlap check, and the metrics JSON
