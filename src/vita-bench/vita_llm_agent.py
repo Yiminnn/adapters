@@ -151,11 +151,12 @@ class VitaLLMAgent(BaseInstalledAgent):
         try:
             summary_path = self.logs_dir / SUMMARY_FILENAME
             summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
-            instruction_path = self.logs_dir / "vita-llm-agent.instruction.md"
             trajectory = build_atif_trajectory(
                 transcript=json.loads(transcript_path.read_text(encoding="utf-8")),
                 summary=summary,
-                system_prompt=instruction_path.read_text(encoding="utf-8") if instruction_path.exists() else None,
+                # What the runner actually sent (LLMAgent.system_prompt), not the Harbor
+                # instruction, which the runner reads only for the environment time.
+                system_prompt=summary.get("system_prompt"),
                 agent_name=self.name(),
                 agent_version=self.version() or DEFAULT_VERSION,
                 model_name=self.model_name,

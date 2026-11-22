@@ -142,6 +142,9 @@ async def run_agent(args: argparse.Namespace) -> dict[str, Any]:
             enable_think=args.enable_think,
             language=args.language,
         )
+        # The exact system prompt sent to the model (upstream policy with {time} filled in),
+        # recorded for the ATIF trajectory; the Harbor instruction is only used for the time.
+        summary["system_prompt"] = agent.system_prompt
         if args.seed is not None:
             agent.set_seed(args.seed)
         state = agent.get_init_state()
