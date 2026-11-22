@@ -2,7 +2,8 @@
 # Integrity check for the vita-runtime sidecar of one generated task.
 #
 # Asserts that an agent (which can reach the sidecar over HTTP/MCP) cannot inject a
-# fabricated conversation, and that the oracle token from solution/ does work.
+# fabricated conversation or read the full runtime state (user-simulator tool calls,
+# database dump), and that the oracle token from solution/ does work.
 # Needs no LLM: it only exercises the HTTP routes before any conversation starts.
 #
 # Usage: scripts/check_runtime_hardening.sh <generated-task-dir> [image-tag]
@@ -35,12 +36,15 @@ check "POST /state without token is rejected" \
   "$(code -X POST -H 'Content-Type: application/json' -d "${FAKE}" "http://127.0.0.1:${PORT}/state")" 403
 check "POST /state with a wrong token is rejected" \
   "$(code -X POST -H 'Content-Type: application/json' -H 'X-Vita-Oracle-Token: nope' -d "${FAKE}" "http://127.0.0.1:${PORT}/state")" 403
-check "GET /state still has no messages after rejected injections" \
-  "$(curl -s "http://127.0.0.1:${PORT}/state" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["messages"]))')" 0
+state_file() { docker exec "${NAME}" cat /var/lib/vita/state.json; }
+check "GET /state is not served (full state is not agent-readable)" \
+  "$(code "http://127.0.0.1:${PORT}/state")" 405
+check "state still has no messages after rejected injections" \
+  "$(state_file | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["messages"]))')" 0
 check "POST /state with the oracle token is accepted" \
   "$(code -X POST -H 'Content-Type: application/json' -H "X-Vita-Oracle-Token: ${TOKEN}" -d "${FAKE}" "http://127.0.0.1:${PORT}/state")" 200
 
-# The token must never leak through the agent-reachable state endpoint.
-if curl -s "http://127.0.0.1:${PORT}/state" | grep -q "${TOKEN}"; then echo "FAIL token leaked via GET /state"; fail=1; else echo "ok   token not exposed via GET /state"; fi
+# The token must never leak into the recorded state (it is handed to the verifier).
+if state_file | grep -q "${TOKEN}"; then echo "FAIL token leaked into the recorded state"; fail=1; else echo "ok   token not in the recorded state"; fi
 
 exit "${fail}"

@@ -569,12 +569,8 @@ def record_termination(reason: str) -> str:
     return on_vita_thread(runtime.record_termination, reason)
 
 
-@mcp.custom_route("/state", methods=["GET"])
-async def http_get_state(request: Any) -> Any:
-    """Export the recorded conversation (used by the verifier)."""
-    from starlette.responses import JSONResponse
-
-    return JSONResponse(json.loads(json.dumps(on_vita_thread(runtime.state_payload), default=str)))
+# No GET /state: the full state (user-simulator tool calls, database dump) must not be
+# agent-readable. The verifier gets it as a sidecar artifact (/var/lib/vita/state.json).
 
 
 @mcp.custom_route("/state", methods=["POST"])

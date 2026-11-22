@@ -70,6 +70,11 @@ write_models_config({os.environ[\"AGENT_MODEL\"]: o, os.environ[\"USER_MODEL\"]:
     if grep -rqE "Bearer [A-Za-z0-9_-]{20,}" data/simulations/"'"$SAVE_TO"'"*; then echo "refusing to copy: unredacted key" >&2; exit 3; fi
     umask 077
     cp -r data/simulations/"'"$SAVE_TO"'"* /out/
+    # Hand the export to whoever owns the bind mount (the invoking host user). Rootful
+    # Docker runs this as root, so without it the files are root-owned and the host-side
+    # chmod/aggregate.py fail; under rootless runtimes /out is owned by container root
+    # (= the host user) and this is a no-op.
+    chown -R "$(stat -c %u:%g /out)" /out/"'"$SAVE_TO"'"*
   '
 chmod -R go-rwx "$OUT_DIR"
 echo "Wrote $OUT_DIR/$SAVE_TO (upstream simulation batch; API keys redacted)"
