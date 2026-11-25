@@ -39,7 +39,7 @@ int parse_csv_records(int record_count, int* field_sizes, char** csv_data, char*
             return -1;
         }
         len = strlen(csv_data[i]);
-        if (len > CSV_MAX_TOTAL_SIZE || required > CSV_MAX_TOTAL_SIZE - len - 1) {
+        if (len >= CSV_MAX_TOTAL_SIZE || required > CSV_MAX_TOTAL_SIZE - len - 1) {
             return -1;
         }
         required += len + 1; /* record + ',' separator (or final '\0') */

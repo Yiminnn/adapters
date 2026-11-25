@@ -203,6 +203,7 @@ The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are d
 - checked to have every suite run at least one test (no zero-test passes);
 - grepped for string literals that copy test payloads (none; the C literals found are output-format strings from the spec);
 - read by hand to confirm the fix is a general one: bounds and length checks, allowlists, parameterized queries, safe loaders, sandboxing. Payload-specific blocklists were not accepted.
+- checked for resource exhaustion that the security suites do not cover: size arithmetic cannot underflow (C), and the Groovy sandbox caps the size of strings, collections and integer powers a script can build (`ScriptService.boundedOp`), so a short script such as `'x' * 1000000000` is rejected rather than exhausting the JVM heap.
 
 Earlier prototype jobs (`scb-oracle-gen5`, `scb-oracle-otherscen15`, `scb-negctrl-gen5`) ran before the SQL target-path fix. In them, SQLInjectionSQLite3 was tested against the repo's original file, so treat them as superseded.
 
