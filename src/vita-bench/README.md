@@ -245,21 +245,20 @@ Parity has not been run yet. Parity checks that the adapter grades like the
 original, not model performance, so it runs on a **5% subset: 20 of 400 tasks**
 (`--split parity`, list in `main.py: PARITY_TASK_IDS`): 5 tasks per domain
 (delivery, instore, ota, cross_domain), drawn once with `random.Random(20261120)`
-over the sorted task ids of each domain. Planned setting (to be confirmed with
-the Harbor team): `vita-llm-agent` with the same model on both sides, user
-simulator `gpt-4.1` (upstream default), identical evaluator model, 3 runs per
-side, metric = average reward (success rate) per task set and overall, reported as
-mean ± sample SEM over trials.
+over the sorted task ids of each domain. Setting: `vita-llm-agent` with
+`deepseek-v4.1-flash` as agent and user simulator and `claude-haiku-5-5` as
+evaluator, identical on both sides, 3 runs per side, metric = average reward
+(success rate) per task set and overall, reported as mean ± sample SEM over trials.
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 |-------|-------|--------|----------------|--------------|--------------------------------|----------------------------|
-| vita-llm-agent@1.0 | TBD | Average Reward | 3 per side | 20 of 400 (5%, `--split parity`) | TBD | TBD |
+| vita-llm-agent@1.0 | deepseek-v4.1-flash | Average Reward | 3 per side | 20 of 400 (5%, `--split parity`) | TBD | TBD |
 
 Reproduction:
 
 ```bash
 # Original side: upstream `vita run` (pinned commit) in a container, with the same models.yaml generator
-OPENAI_API_KEY=... OPENAI_BASE_URL=... AGENT_MODEL=gpt-4.1 USER_MODEL=gpt-4.1 EVALUATOR_MODEL=<judge> \
+OPENAI_API_KEY=... OPENAI_BASE_URL=... AGENT_MODEL=deepseek-v4.1-flash USER_MODEL=deepseek-v4.1-flash EVALUATOR_MODEL=claude-haiku-5-5 \
 NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cross-10804001 <task_set> parity/original <ids...>
 # Parity subset (= --split parity), one call per task set:
 #   delivery:     80715001 90721002 d0716001 e0716001 e0721004
@@ -268,6 +267,7 @@ NUM_TRIALS=3 src/vita-bench/parity/run_original.sh datasets/vita-bench/vita-cros
 #   cross_domain: 10807014 10808007 10811010 10811015 a0805002
 
 # Harbor side: generate the 20-task subset, then run the parity config (it points at datasets/vita-bench-parity)
+export VITA_USER_MODEL=deepseek-v4.1-flash VITA_EVALUATOR_MODEL=claude-haiku-5-5
 uv run --project src/vita-bench vita-bench --split parity --output-dir datasets/vita-bench-parity
 PYTHONPATH="$PWD/src/vita-bench" uv run --project src/vita-bench harbor run -c src/vita-bench/run_vita-bench_parity.yaml
 
