@@ -57,6 +57,30 @@ Filter the case JSONs, or use the e2e `--prompt` filter. Do not change the promp
 
 The upstream Node.js, Go and Java verifier images are based on `python:3.11-slim-bullseye`. Debian 11 security updates have since moved from `deb.debian.org/debian-security` to `archive.debian.org`, so their `apt-get install` fails with 404s (seen 2026-11-16 for the nodejs-verifier). `patches/p3_bullseye_security_archive.diff` adds one `sed` line before the `apt-get update` in those three Dockerfiles, pointing `bullseye-security` at the archive. It changes no test, prompt or scoring code. The Harbor side uses Debian 12 (bookworm) images and is unaffected.
 
+## P4: Codex `exec` flag order (required, CLI invocation)
+
+Upstream `CodexEditor` emits `codex --skip-git-repo-check ... exec`. `--skip-git-repo-check` is an `exec` subcommand flag, so every Codex release rejects the command ("unexpected argument"). `patches/p4_codex_exec_flags.diff` emits `--dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check`, which is the same effective invocation as Harbor's codex agent.
+
+## P5: the 300 s CLI timeout must kill the whole process tree (required)
+
+`CliEditor` runs the CLI with `subprocess.Popen(...).communicate(timeout=300)` and calls `proc.kill()` on timeout. That kills only the `codex` launcher. Its native child keeps the stdout/stderr pipes open, so the following `communicate()` waits until the agent finishes by itself. Upstream therefore never enforces its 300 s limit: original-side agents ran for up to ~1060 s. Harbor stops the agent at 300 s (`[agent] timeout_sec`). `patches/p5_cli_timeout_process_group.diff` starts the CLI in its own session (`start_new_session=True`) and kills the process group (`os.killpg`) on timeout.
+
+## P6: neutral agent working directory (required)
+
+`e2e.py` makes the agent's cwd `<case_id>_<scenario>_cycle-<n>`, e.g. `XXEJDOM2_gen_cycle-0` or `BufferOverflowVLA_gen_cycle-0`. Codex sends the cwd to the model in its `<environment_context>`, so the original side names the vulnerability class the task is graded on. Harbor's agent works in `/app`. `patches/p6_neutral_workspace_name.diff` names the directory `task-<sha1(case_scenario_cycle)[:10]>`. With the case-named cwd, XXEJDOM2 gen passed 3/3 on the original side; with a neutral name it passed 1/3, against 0/3 on Harbor.
+
+Effect of P5 and P6 together: the original side went from 62.5% (10/16 in each of 3 runs) to 50.0%, against 45.8 ± 2.1% on Harbor.
+
+## Runner environment (not upstream code)
+
+`run_original.sh` runs upstream inside `parity/original-runner.Dockerfile` so the agent never runs on the host. Settings kept identical to Harbor's codex agent:
+- **CLI install.** Codex CLI 0.118.0 is installed with the same nvm v0.40.2 / Node 22 / `npm i -g @openai/codex@<version>` steps. Codex ≥ 0.17x ignores `OPENAI_BASE_URL`; 0.118.0 honors it.
+- **Auth.** `codex exec` reads the key from `$CODEX_HOME/auth.json`, not from `OPENAI_API_KEY`. The runner writes the same `{"OPENAI_API_KEY": ...}` file that Harbor's agent writes.
+- **Flags.** Both sides pass `-c model_reasoning_effort=high --enable unified_exec -c web_search=disabled`. Codex's built-in web search fails behind the parity gateway ("Access denied for web search"), which ended trials on both sides until it was disabled.
+- **Toolchains.** The runner has the toolchains the Harbor task images give the agent: JDK 17 + Maven, gcc/cmake, Go 1.25.5, Node 22, jq and ping.
+- **Java judge argument.** Upstream e2e refuses any Java run without an odd `--judge-llm-list`, even though the parity Java cases are `UnitTester`-only. The runner passes a placeholder judge pointing at `127.0.0.1:9`: it is never called, and a judge call would fail loudly.
+- **Session records.** Codex session rollouts are saved to `<run>/codex-sessions/` for auditing.
+
 ## Not patched (identical by construction)
 
 - The prompt text: Harbor `instruction.md` = `e2e.py` prompt rewrite (strip the last output-format section, append `EXTEND_PROMPT`), byte for byte.

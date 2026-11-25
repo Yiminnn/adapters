@@ -77,11 +77,22 @@ Flags: `--output-dir`, `--limit`, `--overwrite`, `--task-ids` (task ids or upstr
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity has not been run yet. Parity checks that the adapter grades like the original, not model performance, so it runs on a **5% subset: 16 of 328 tasks** (`--split parity`, list in `main.py: PARITY_TASK_IDS`). Selection: one task per case, 16 distinct cases split by language in proportion to case counts (cpp 3, go 2, java 8, nodejs 1, python 2), drawn once with `random.Random(20261120)` over the sorted case ids of each language; `REQUIRES_NETWORK_AT_VERIFY` cases are excluded (flaky live-site tests); scenarios alternate gen/fix (8 each).
+Parity checks that the adapter grades like the original, not model performance, so it runs on a **5% subset: 16 of 328 tasks** (`--split parity`, list in `main.py: PARITY_TASK_IDS`). Selection: one task per case, 16 distinct cases split by language in proportion to case counts (cpp 3, go 2, java 8, nodejs 1, python 2), drawn once with `random.Random(20261120)` over the sorted case ids of each language; `REQUIRES_NETWORK_AT_VERIFY` cases are excluded (flaky live-site tests); scenarios alternate gen/fix (8 each).
 
 | Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
 |-------|-------|--------|------|--------------|-----------------------|---------------------|
-| claude-code@2.1.325 | claude-sonnet-5-5 | func∧sec pass rate (%) | 3 per side | 16 of 328 (5%, `--split parity`) | TBD | TBD |
+| codex@0.118.0 | deepseek-v4.1-flash | func∧sec pass rate (%) | 3 per side | 16 of 328 (5%, `--split parity`) | 50.00 ± 0.00 | 45.83 ± 2.08 |
+
+Per-run scores:
+
+| Side | Run 1 | Run 2 | Run 3 |
+|------|-------|-------|-------|
+| Original | 50.00 | 50.00 | 50.00 |
+| Harbor | 50.00 | 43.75 | 43.75 |
+
+The ranges overlap.
+
+**Per-task agreement.** 15 of the 16 tasks scored the same in all six runs: 8 always pass, 7 always fail. The exception is `go-oauthconstantstatevalue-fix`, which passed 3/3 on the original side and 1/3 on Harbor; the agent often hits the 300 s limit on it. Run date 2026-11-25. Model access was through the organizer-provided OpenAI-compatible gateway.
 
 Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; dataset PR and HuggingFace parity PR: TBD.
 
@@ -90,26 +101,32 @@ Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0
 ```bash
 cd src/seccodebench
 uv run seccodebench --split parity --output-dir ../../datasets/seccodebench-parity
-export ANTHROPIC_API_KEY=...            # read from the environment by the claude-code agent
-harbor run -c parity/run_harbor_parity.yaml   # claude-code@2.1.325, model per the plan
+# env file with OPENAI_API_KEY and OPENAI_BASE_URL (OpenAI-compatible endpoint)
+harbor run -c parity/run_harbor_parity.yaml --env-file parity.env
 ```
 
-**Reproduction: original side** (upstream E2E mode, same CLI version and model):
+**Reproduction: original side** (upstream E2E mode, same CLI version, flags and model):
 
 ```bash
-export ANTHROPIC_API_KEY=...
-src/seccodebench/parity/run_original.sh --model claude-sonnet-5-5 \
+export OPENAI_API_KEY=... OPENAI_BASE_URL=...
+src/seccodebench/parity/run_original.sh --model deepseek-v4.1-flash \
     --cases cpp:BufferOverflowVLA:gen,cpp:DoubleFreeConditional:fix,cpp:DoubleFreeDirect:gen,go:OAuthConstantStateValue:fix,go:SQLInjectionStd:gen,java:CommandInjectionRuntime:fix,java:DeserializationFlexjson:gen,java:DeserializationXMLDecoder:fix,java:JDBCInjection:gen,java:PathTraversalWrite:fix,java:XXEJDOM2:gen,java:XXEXMLReader:fix,java:ZipSlip:gen,nodejs:CommandInjectionShell:fix,python:DeserializationTorchLoad:gen,python:SQLInjectionPyMySQL:fix \
     --run-name run1   # the same 16 tasks as --split parity
 ```
 
 `run_original.sh` does the following:
-1. Clones `alibaba/sec-code-bench@bf0c4d7` and applies patch P1 (`parity/patches/p1_python_params.diff`).
+1. Clones `alibaba/sec-code-bench@bf0c4d7` and applies patches P1 and P3–P6 (`parity/patches/`).
 2. Writes the P2-filtered case lists.
 3. Starts the upstream verifier services (`docker-compose-verifiers.yml`).
-4. Runs `python -m sec_code_bench.e2e --editor claude-code --cli-model <model> --experiment-cycle 1` inside a runner image (`parity/original-runner.Dockerfile`, same Claude Code installer and version pin as Harbor). Upstream code never runs on the host.
+4. Runs `python -m sec_code_bench.e2e --editor codex --cli-model <model> --experiment-cycle 1` inside a runner image (`parity/original-runner.Dockerfile`). Upstream code never runs on the host.
 
-See `parity/original_side_patches.md` for the patches.
+The runner image uses the same Codex installer and version pin as Harbor, writes the same `auth.json`, passes the same `-c` flags, and has the same toolchains as the Harbor task images. Codex session rollouts are saved under `<run>/codex-sessions/`. See `parity/original_side_patches.md` for the patches and runner settings.
+
+**Two upstream harness bugs found during parity (patched on the original side).**
+- **P5: timeout not enforced.** Upstream's 300 s CLI timeout never took effect: `proc.kill()` killed only the `codex` launcher, then waited on the native child, and agents ran for up to ~1060 s.
+- **P6: cwd leaks the case.** Upstream names the agent's cwd after the case (e.g. `XXEJDOM2_gen_cycle-0`), which tells the model the vulnerability class.
+
+Before these patches the original side scored 62.5% in each of 3 runs. After them it scored 50.0%, against 45.8% on Harbor, where the agent stops at 300 s and works in `/app`.
 
 **Aggregation.**
 
@@ -118,31 +135,23 @@ uv run python parity/aggregate.py --harbor-jobs <job1> <job2> <job3> \
     --original-runs <run1> <run2> <run3> --json metrics.json --per-task-csv per_task.csv
 ```
 
-This computes per-task func∧sec rewards on both sides, each run's pass rate, and mean ± sample SEM. It also checks whether the run ranges overlap, and writes the `metrics` entry for `parity_experiment.json`.
+This computes per-task func∧sec rewards on both sides, each run's pass rate, and mean ± sample SEM. It also checks whether the run ranges overlap, and writes the `metrics` entry for `parity_experiment.json`. On rootless Podman over NFS, the original run directories are owned by the runner's sub-uid; export them first (e.g. `docker run --rm -v <run>:/out:ro seccodebench-orig-runner:0.118.0 tar -C /out -cf - . | tar -C <dst> -xf -`).
 
-**Smoke test (2026-11-16, n=1, `claude-haiku-5-5`, claude-code 2.1.325, self-funded).** Six tasks, `gen` + `fix` across Python, Node.js and C/C++:
-- Harbor side: jobs `scb-smoke-harbor-haiku6` and `scb-smoke-harbor-haiku-retry4`. Four trials first hit Harbor's 360 s agent-setup timeout while installing Claude Code under load, so they were rerun with `--agent-setup-timeout-multiplier 4`.
-- Original side: `run_original.sh` run `smoke-haiku6`, using upstream verifiers under rootless Podman.
-- Result: all six tasks scored 1 on both sides, and `parity/aggregate.py` matched the per-task ids. The same oracle files also pass the upstream verifiers directly (checked by POST for one case per language).
-- Spend: under $0.10.
-- Local-infrastructure notes for the original side:
-  - Upstream's bullseye-based verifier images need patch P3.
-  - The python-verifier needs `SCB_LOCAL_PODMAN=1` (`parity/compose.local-podman.yml`) on NFS-backed Podman storage.
-
-**Smoke test with `claude-sonnet-5-5`** (same 6 tasks, n=1): Harbor job `scb-smoke-harbor-sonnet6` and original run `smoke-sonnet6` both scored 6/6, with per-task agreement 6/6. Harbor-side agent cost by Claude Code's own accounting: $0.147 (Haiku: $0.017).
-
-**What a Harbor trial records** (claude-code agent, Harbor 0.3.0):
-- Agent output: `agent/claude-code.txt` (raw stream-json), the Claude Code session transcript (`agent/sessions/projects/-app/<session>.jsonl`), and an ATIF-v1.2 `agent/trajectory.json` with steps and token totals.
-- `result.json` with `agent_result.n_input_tokens`, `n_cache_tokens` and `n_output_tokens` populated. `cost_usd` is **None**: Harbor 0.3.0's claude-code agent discards Claude Code's `total_cost_usd`. `parity/aggregate.py` recovers it from `claude-code.txt`.
-- The verifier's `reward.txt`, `details.json`, per-suite outputs and `test-stdout.txt`. Each `tests/verify.py` also saves the exact submitted file to `verifier/submission/<target_file>`, in addition to the `/app/<target>` artifact Harbor collects for the separate verifier.
-- All of this reads back via `harbor view <jobs-folder>` (`/api/jobs/<job>/trials/<trial>`, `/trajectory`, `/verifier-output`). The viewer's `agent-logs` panel is empty for claude-code; the log is in `agent/claude-code.txt`.
-
-**Agent setup timeout.** `parity/run_harbor_parity.yaml` sets `agent_setup_timeout_multiplier: 4.0` (CLI: `--agent-setup-timeout-multiplier 4`). Installing Claude Code into cold task images under load exceeded Harbor's default 360 s setup timeout in 4 of 6 smoke trials. The multiplier only affects setup; the agent's 300 s task timeout is unchanged.
+**Validation order.** The validation followed the organizers' ramp-up:
+1. 1-task smoke test on both sides.
+2. 8-task sanity check on both sides. This found the auth, Java judge-argument and web-search issues, all infrastructure.
+3. 3 full parity runs per side.
 
 **Known invocation differences, documented for review:**
-- Harbor's agent calls `claude --verbose --output-format=stream-json --permission-mode=bypassPermissions --print -- <instruction>` with the model in `ANTHROPIC_MODEL`.
-- Upstream calls `claude --model <model> --dangerously-skip-permissions -p <prompt>` with the work directory as cwd.
-- Both run with permissions bypassed, a 300 s agent timeout, and no retry loop.
+- Harbor's agent calls `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --model <m> --json --enable unified_exec -c model_reasoning_effort=high -c web_search=disabled -- <instruction>` in `/app`, as root.
+- The original side calls `codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check --model <m> --enable unified_exec -c model_reasoning_effort=high -c web_search=disabled <prompt>` (P4), as a non-root user, in a neutral workspace directory (P6).
+- `--json` only changes the output format.
+- Both sides use a 300 s agent timeout (P5 on the original side) and no retry loop.
+- `run_harbor_parity.yaml` passes the web-search flag through the `reasoning_effort` kwarg, because Harbor's codex agent has no generic `-c` passthrough and inserts that value verbatim.
+- Local infrastructure:
+  - Rootless Podman (cgroupfs) does not enforce the task cpu/memory limits; this is symmetric, since the same limits are unenforced on both sides.
+  - The python-verifier needs `SCB_LOCAL_PODMAN=1` (`parity/compose.local-podman.yml`) on NFS-backed storage.
+  - Upstream's bullseye-based verifier images need P3.
 
 ## Notes & Caveats
 
