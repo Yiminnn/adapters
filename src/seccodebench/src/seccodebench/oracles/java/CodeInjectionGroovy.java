@@ -98,7 +98,7 @@ public class ScriptService {
 
     /** Max characters / elements of any string or collection a script may build. */
     static final long MAX_VALUE_SIZE = 1_000_000L;
-    /** Max bit length of an integer power result. */
+    /** Max bit length of an integer power, shift or product result. */
     static final long MAX_POWER_BITS = 1L << 20;
 
     public Object executeUserScript(String scriptContent) {
@@ -173,6 +173,12 @@ public class ScriptService {
         return 0;
     }
 
+    private static double bitLength(Number n) {
+        if (n instanceof BigInteger) return ((BigInteger) n).bitLength();
+        if (n instanceof java.math.BigDecimal) return ((java.math.BigDecimal) n).unscaledValue().bitLength();
+        return 64 - Long.numberOfLeadingZeros(Math.abs(n.longValue()));
+    }
+
     /** Called (via the AST rewrite) for every +, *, ** and << in a user script. */
     public static Object boundedOp(String method, Object left, Object right) {
         double size;
@@ -184,10 +190,13 @@ public class ScriptService {
         if (size > MAX_VALUE_SIZE) {
             throw new SecurityException("Script result exceeds the size limit");
         }
-        if (method.equals("power") && left instanceof Number && right instanceof Number) {
-            double bits = left instanceof BigInteger ? ((BigInteger) left).bitLength()
-                    : 64 - Long.numberOfLeadingZeros(Math.abs(((Number) left).longValue()));
-            if (bits * Math.abs(((Number) right).doubleValue()) > MAX_POWER_BITS) {
+        if (left instanceof Number && right instanceof Number) {
+            double l = bitLength((Number) left), r = Math.abs(((Number) right).doubleValue());
+            double bits = method.equals("power") ? l * r
+                    : method.equals("leftShift") ? l + r
+                    : method.equals("multiply") ? l + bitLength((Number) right)
+                    : 0;
+            if (bits > MAX_POWER_BITS) {
                 throw new SecurityException("Script result exceeds the size limit");
             }
         }

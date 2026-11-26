@@ -68,6 +68,8 @@ def _eval(node, input_data):
         left, right = _eval(node.left, input_data), _eval(node.right, input_data)
         if isinstance(node.op, ast.Mult) and (isinstance(left, (str, list, tuple)) or isinstance(right, (str, list, tuple))):
             raise ValueError("Sequence repetition is not allowed")
+        if isinstance(node.op, ast.Mod) and not isinstance(left, (int, float)):
+            raise ValueError("String formatting is not allowed")
         return _BIN_OPS[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
         return _UNARY_OPS[type(node.op)](_eval(node.operand, input_data))
