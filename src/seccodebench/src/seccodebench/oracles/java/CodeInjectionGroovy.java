@@ -42,6 +42,7 @@ import org.codehaus.groovy.runtime.InvokerHelper;
 import org.codehaus.groovy.syntax.Types;
 
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collection;
@@ -62,7 +63,8 @@ import java.util.Map;
  * dependencies, and always terminate (no loops, closures or methods means no recursion).
  * Size-amplifying operators (+, *, **, <<) are routed through bounded helpers so a short
  * script cannot exhaust the heap (e.g. 'x' * 1000000000); GStrings and compound
- * assignments (which could double a value per statement unchecked) are rejected.
+ * assignments (which could double a value per statement unchecked) are rejected, as are the
+ * regex operators (==~, =~: backtracking with no deadline) and decimal literals with a huge scale.
  */
 public class ScriptService {
 
@@ -98,8 +100,12 @@ public class ScriptService {
 
     /** Max characters / elements of any string or collection a script may build. */
     static final long MAX_VALUE_SIZE = 1_000_000L;
-    /** Max bit length of an integer power, shift or product result. */
+    /** Max bit length of a numeric +, *, ** or << result (decimal scale counted in bits). */
     static final long MAX_POWER_BITS = 1L << 20;
+    /** Max |scale| of a decimal literal, e.g. 1e600000000G would need ~2e9 bits to align. */
+    static final int MAX_DECIMAL_SCALE = 10_000;
+    /** Regex operators run Java's backtracking matcher with no deadline ('(a+)+$'). */
+    private static final List<Integer> REGEX_OPERATORS = Arrays.asList(Types.MATCH_REGEX, Types.FIND_REGEX);
 
     public Object executeUserScript(String scriptContent) {
         if (scriptContent == null || scriptContent.trim().isEmpty()) {
@@ -156,7 +162,11 @@ public class ScriptService {
         }
         if (expr instanceof BinaryExpression) {
             int op = ((BinaryExpression) expr).getOperation().getType();
-            return op != Types.LEFT_SQUARE_BRACKET && !COMPOUND_ASSIGNMENTS.contains(op);
+            return op != Types.LEFT_SQUARE_BRACKET && !COMPOUND_ASSIGNMENTS.contains(op)
+                    && !REGEX_OPERATORS.contains(op);
+        }
+        if (expr instanceof ConstantExpression && ((ConstantExpression) expr).getValue() instanceof BigDecimal) {
+            return Math.abs(((BigDecimal) ((ConstantExpression) expr).getValue()).scale()) <= MAX_DECIMAL_SCALE;
         }
         if (expr instanceof VariableExpression) {
             VariableExpression var = (VariableExpression) expr;
@@ -175,7 +185,10 @@ public class ScriptService {
 
     private static double bitLength(Number n) {
         if (n instanceof BigInteger) return ((BigInteger) n).bitLength();
-        if (n instanceof java.math.BigDecimal) return ((java.math.BigDecimal) n).unscaledValue().bitLength();
+        if (n instanceof BigDecimal) {
+            BigDecimal d = (BigDecimal) n;  // aligning scales multiplies the coefficient by 10^|scale|
+            return d.unscaledValue().bitLength() + Math.abs((double) d.scale()) * 3.33;
+        }
         return 64 - Long.numberOfLeadingZeros(Math.abs(n.longValue()));
     }
 
@@ -195,6 +208,7 @@ public class ScriptService {
             double bits = method.equals("power") ? l * r
                     : method.equals("leftShift") ? l + r
                     : method.equals("multiply") ? l + bitLength((Number) right)
+                    : method.equals("plus") ? Math.max(l, bitLength((Number) right)) + 1
                     : 0;
             if (bits > MAX_POWER_BITS) {
                 throw new SecurityException("Script result exceeds the size limit");
