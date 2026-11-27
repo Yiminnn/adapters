@@ -94,7 +94,7 @@ The ranges overlap.
 
 **Per-task agreement.** 15 of the 16 tasks scored the same in all six runs: 8 always pass, 7 always fail. The exception is `go-oauthconstantstatevalue-fix`, which passed 3/3 on the original side and 1/3 on Harbor; the agent often hits the 300 s limit on it. Run date 2026-11-25. Model access was through the organizer-provided OpenAI-compatible gateway.
 
-Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; HuggingFace parity PR https://huggingface.co/datasets/harborframework/parity-experiments/discussions/310; dataset PR https://github.com/harbor-framework/harbor-datasets/pull/314.
+Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; HuggingFace parity PR https://huggingface.co/datasets/harborframework/parity-experiments/discussions/310 (files: https://huggingface.co/datasets/yiminn/seccodebench-parity-experiments, since the parity repo is over its file limit); dataset PR https://github.com/harbor-framework/harbor-datasets/pull/314.
 
 **Reproduction: Harbor side.**
 
