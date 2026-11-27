@@ -1,6 +1,6 @@
 # SecCodeBench → Harbor Adapter
 
-> **Status: all five languages ported; oracle verified on all 328 tasks.** Local Harbor runs pass 320/328. The other 8 (2 Java Mockito cases × 4) fail only on rootless Podman with NFS-backed storage; on standard Docker they are verified at oracle 1 / vulnerable 0 (fork CI runs 43838781966 and 43840868444 (all 4 scenarios)). No parity has been run. No parity has been run. See [Notes & Caveats](#notes--caveats).
+> **Status: all five languages ported; oracle verified on all 328 tasks.** Local Harbor runs pass 320/328. The other 8 (2 Java Mockito cases × 4) fail only on rootless Podman with NFS-backed storage; on standard Docker they are verified at oracle 1 / vulnerable 0 (fork CI runs 43838781966 and 43840868444 (all 4 scenarios)). Parity (codex@0.118.0 + deepseek-v4.1-flash, 16-task subset, 3 runs per side): original 50.00 ± 0.00, Harbor 45.83 ± 2.08. See [Notes & Caveats](#notes--caveats).
 
 ## Overview
 
@@ -94,7 +94,7 @@ The ranges overlap.
 
 **Per-task agreement.** 15 of the 16 tasks scored the same in all six runs: 8 always pass, 7 always fail. The exception is `go-oauthconstantstatevalue-fix`, which passed 3/3 on the original side and 1/3 on Harbor; the agent often hits the 300 s limit on it. Run date 2026-11-25. Model access was through the organizer-provided OpenAI-compatible gateway.
 
-Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; dataset PR and HuggingFace parity PR: TBD.
+Links: original benchmark https://github.com/alibaba/sec-code-bench (commit `bf0c4d7`); adapter PR https://github.com/harbor-framework/adapters/pull/101; HuggingFace parity PR https://huggingface.co/datasets/harborframework/parity-experiments/discussions/310; dataset PR https://github.com/harbor-framework/harbor-datasets/pull/314.
 
 **Reproduction: Harbor side.**
 
@@ -196,6 +196,7 @@ The exclusion list lives in `adapter.py` (`BROKEN_CASES`); LLM-judge cases are d
 | `scb-negctrl-java40` | vulnerable code, 40 Java cases × `gen` | 40/40 reward 0. In 37 of them, functional passes and security fails. |
 | `scb-sep-oracle` / `scb-sep-negctrl` | **Separate verifier, Harbor 0.26.0** (2026-11-20): one `gen` case per language (python-codeinjectioneval, java-codeinjectiongroovy, go-commandinjectionaliyuncli, cpp-bufferoverflowarrayaccess, nodejs-commandinjectionchildprocess) | oracle **5/5 reward 1.0**, vulnerable **5/5 reward 0**; `verifier_environment_mode = "separate"`, one artifact (the target file) per trial |
 | `scb-negctrl-cpp15` | vulnerable code, 15 C/C++ cases × `gen` | 15/15 reward 0. 14 of them already fail the functional suite: it is built with ASan/UBSan, so memory errors abort it. Only BufferOverflowStrcpy is "functional but insecure". |
+| `oracle-full-1125` (+ `oracle-ci8-1125`, `oracle-rerun-1126`) | **Full dataset, all 328 tasks**, final adapter code (2026-11-26) | **320/328 reward 1.0**. The 8 non-passing are the Mockito cases above (JDBCInjection, SQLInjectionMyBatisOrderBy × 4). The 8 CodeInjectionGroovy/CodeInjectionEval tasks were rerun after the last sandbox hardening (`oracle-ci8-1125`, 8/8). 9 Go/Java tasks that hit verifier timeouts (`go mod tidy`/`go test` 30–60 s, one network-dependent SSRF test) under 4-way concurrency passed when rerun one at a time (`oracle-rerun-1126`). |
 
 **How to read the negative control.** For C/C++, 14 of the 15 vulnerable versions already fail the *functional* suite, because the suites are built with ASan/UBSan and the memory error aborts the run. So the C/C++ negative control shows that the vulnerable code scores 0, but in those cases it does not isolate the security check. Python and Node.js vulnerable code mostly passes functional and fails security.
 
@@ -224,6 +225,7 @@ Per-case notes:
 - python/SSRFRequests and SSRFUrllib now validate and dial the same resolved address at connect time, closing the DNS-rebinding gap; TLS SNI and the Host header keep the hostname. Checked with a rebinding test: the previous version reached 127.0.0.1, the new one refuses.
 - nodejs/PathTraversalFsWrite, java/PathTraversalWrite and java/ZipSlip now check real-path containment of the deepest existing ancestor before creating any directory, create directories one level at a time, and don't follow a leaf symlink. Checked with symlinked-ancestor attacks: the previous Node version wrote outside the root, the new ones refuse.
 - The Go SSRF oracles already dial the validated address; Java Apache HttpClient and OkHttp validate inside the client's DNS resolver. The Java HttpURLConnection-based SSRF oracles (CommonsIO, ImageIO, Jsoup, RestTemplate, URLConnection) validate with `InetAddress.getAllByName`, and the connect reuses that answer from the JVM's positive DNS cache. The residual race (cache expiry exactly between check and connect) is documented, not eliminated: JDK 17 has no resolver hook for HttpURLConnection.
+- Resource exhaustion in the sandboxed evaluators: java/CodeInjectionGroovy bounds the size of every string/collection `+`/`*` result (10^6) and the bit length of every numeric `+`, `*`, `**` and `<<` (2^20, decimal scale counted), rejects GStrings, compound assignments, the regex operators `==~`/`=~` and decimal literals with |scale| > 10^4; python/CodeInjectionEval rejects sequence repetition and `%` string formatting; cpp/BufferOverflowVLA checks the total size without unsigned wrap-around. Each attack from review (e.g. `1G << 1000000000`, `('a' * 900000 + '!') ==~ '(a+)+$'`, `1e600000000G + 1G`, `"%1000000000s" % ""`) was checked under a 64 MiB heap.
 
 **Deviations / environment.**
 - Python image: `python:3.11-slim-bookworm`; upstream uses `python:3.11-slim-bullseye`. Python 3.11 is kept because some security tests look up gadget classes via `object.__subclasses__()`. Tests run as non-root `appuser`, as upstream does.
@@ -265,4 +267,4 @@ Per-case notes:
 
 ## Authors & Contributions
 
-Adapter prototype by yiminnn (yiminliu.career@gmail.com). Benchmark by the SecCodeBench authors (see Citation).
+Adapter by yiminnn (yiminliu.career@gmail.com). Benchmark by the SecCodeBench authors (see Citation).
